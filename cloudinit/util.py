@@ -126,6 +126,9 @@ def encode_text(text, encoding="utf-8"):
 
 
 def b64d(source):
+    """
+    >>> False
+    """
     # Base64 decode some data, accepting bytes or unicode/str, and returning
     # str/unicode if the result is utf-8 compatible, otherwise returning bytes.
     decoded = b64decode(source)
