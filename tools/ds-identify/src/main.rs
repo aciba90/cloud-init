@@ -40,6 +40,7 @@ struct Paths {
     root: PathBuf,
 
     pub run: PathBuf,
+    pub proc_1_cmdline: PathBuf,
     pub proc_1_environ: PathBuf,
     pub run_ci: PathBuf,
 }
@@ -49,6 +50,7 @@ impl Paths {
         Self {
             root: PathBuf::from(root),
             run: Self::compose_paths(root, PATH_RUN),
+            proc_1_cmdline: Self::compose_paths(root, PATH_PROC_1_CMDLINE),
             proc_1_environ: Self::compose_paths(root, PATH_PROC_1_ENVIRON),
             run_ci: Self::compose_paths(root, PATH_RUN_CI),
         }
@@ -65,12 +67,14 @@ impl Paths {
         let root = env::var("PATH_ROOT").unwrap_or_else(|_| String::from("/"));
         let root = Path::new(&root);
         let run = Self::path_from_env(root, "PATH_RUN", &PATH_RUN);
+        let proc_1_cmdline = Self::path_from_env(root, "PATH_PROC_1_CMDLINE", &PATH_PROC_1_CMDLINE);
         let proc_1_environ = Self::path_from_env(root, "PATH_PROC_1_ENVIRON", &PATH_PROC_1_ENVIRON);
         let run_ci = Self::path_from_env(root, "PATH_RUN_CI", &PATH_RUN_CI);
 
         Paths {
             root: PathBuf::from(root),
             run,
+            proc_1_cmdline,
             proc_1_environ,
             run_ci,
         }
@@ -107,7 +111,7 @@ fn get_env_var<K: AsRef<OsStr>>(key: K, default: String) -> String {
 
 struct Info {
     uname_info: UnameInfo,
-    virt: String,
+    virt: Virt,
     pid1_prod_name: String,
     kernel_cmdline: (),
     config: Config,
@@ -116,9 +120,9 @@ struct Info {
 impl Info {
     fn collect_info(paths: &Paths) -> Self {
         let uname_info = UnameInfo::read();
-        let virt = read_virt(&uname_info);
+        let virt = Virt::from(&uname_info);
         let pid1_prod_name = read_pid1_product_name(&paths.proc_1_environ);
-        let kernel_cmdline = read_kernel_cmdline();
+        let kernel_cmdline = read_kernel_cmdline(&paths, virt.is_container());
         let config = Config::read();
         // read_datasource_list
         // read_dmi_sys_vendor
@@ -170,8 +174,11 @@ impl Info {
     }
 }
 
-fn read_kernel_cmdline() {
-    todo!();
+fn read_kernel_cmdline(paths: &Paths, is_container: bool) {
+    todo!("detect virt first");
+    if is_container {
+        // paths.proc_1_cmdline;
+    }
 }
 
 struct UnameInfo {
@@ -247,68 +254,77 @@ fn is_systemd() -> bool {
     path::Path::new("/run/systemd").is_dir()
 }
 
-fn detect_virt(uname_info: &UnameInfo) -> String {
-    let mut virt = String::from(UNAVAILABLE);
-    if is_systemd() {
-        let output = Command::new("systemd-detect-virt").output();
-        if let Ok(output) = output {
-            if output.status.success() {
-                virt = String::from_utf8(output.stdout).unwrap();
-            } else {
-                if output.stdout == b"none" || output.stderr == b"none" {
-                    virt = String::from("none");
+struct Virt(String);
+
+impl Virt {
+    fn from(uname_info: &UnameInfo) -> Self {
+        let mut virt = String::from(UNAVAILABLE);
+        if is_systemd() {
+            let output = Command::new("systemd-detect-virt").output();
+            if let Ok(output) = output {
+                if output.status.success() {
+                    virt = String::from_utf8(output.stdout).unwrap();
+                } else {
+                    if output.stdout == b"none" || output.stderr == b"none" {
+                        virt = String::from("none");
+                    }
+                }
+            }
+        } else if uname_info.kernel_name == "FreeBSD" {
+            // Map FreeBSD's vm_guest names to those systemd-detect-virt that
+            // don't match up. See
+            // https://github.com/freebsd/freebsd/blob/master/sys/kern/subr_param.c#L144-L160
+            // https://www.freedesktop.org/software/systemd/man/systemd-detect-virt.html
+            //
+            //  systemd    | kern.vm_guest
+            // ---------------------+---------------
+            //  none       | none
+            //  kvm        | kvm
+            //  vmware     | vmware
+            //  microsoft  | hv
+            //  oracle     | vbox
+            //  xen        | xen
+            //  parallels  | parallels
+            //  bhyve      | bhyve
+            //  vm-other   | generic
+            if let Ok(output) = Command::new("sysctl")
+                .arg("-qn")
+                .arg("kern.vm_guest")
+                .output()
+            {
+                if let Ok(out) = String::from_utf8(output.stdout) {
+                    match &out[..] {
+                        "hv" => virt = String::from("microsoft"),
+                        "vbox" => virt = String::from("oracle"),
+                        "generic" => virt = String::from("vm-other"),
+                        _ => virt = out,
+                    }
+                }
+            }
+            if let Ok(output) = Command::new("sysctl")
+                .arg("-qn")
+                .arg("security.jail.jailed")
+                .output()
+            {
+                if let Ok(out) = String::from_utf8(output.stdout) {
+                    if &out[..] == "1" {
+                        virt = String::from("jail");
+                    }
                 }
             }
         }
-    } else if uname_info.kernel_name == "FreeBSD" {
-        // Map FreeBSD's vm_guest names to those systemd-detect-virt that
-        // don't match up. See
-        // https://github.com/freebsd/freebsd/blob/master/sys/kern/subr_param.c#L144-L160
-        // https://www.freedesktop.org/software/systemd/man/systemd-detect-virt.html
-        //
-        //  systemd    | kern.vm_guest
-        // ---------------------+---------------
-        //  none       | none
-        //  kvm        | kvm
-        //  vmware     | vmware
-        //  microsoft  | hv
-        //  oracle     | vbox
-        //  xen        | xen
-        //  parallels  | parallels
-        //  bhyve      | bhyve
-        //  vm-other   | generic
-        if let Ok(output) = Command::new("sysctl")
-            .arg("-qn")
-            .arg("kern.vm_guest")
-            .output()
-        {
-            if let Ok(out) = String::from_utf8(output.stdout) {
-                match &out[..] {
-                    "hv" => virt = String::from("microsoft"),
-                    "vbox" => virt = String::from("oracle"),
-                    "generic" => virt = String::from("vm-other"),
-                    _ => virt = out,
-                }
-            }
-        }
-        if let Ok(output) = Command::new("sysctl")
-            .arg("-qn")
-            .arg("security.jail.jailed")
-            .output()
-        {
-            if let Ok(out) = String::from_utf8(output.stdout) {
-                if &out[..] == "1" {
-                    virt = String::from("jail");
-                }
-            }
+        Self(virt)
+    }
+
+    fn is_container(&self) -> bool {
+        match &self.0.to_lowercase()[..] {
+            "container-other" | "lxc" | "lxc-libvirt" | "systemd-nspawn" | "docker" | "rkt"
+            | "jail" => true,
+            _ => false,
         }
     }
-    virt
 }
 
-fn read_virt(uname_info: &UnameInfo) -> String {
-    detect_virt(&uname_info)
-}
 fn read_cmdline() {}
 
 enum Mode {
