@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use std::io::{BufRead, BufReader, Error, Write};
+use std::io::{BufRead, BufReader};
 use std::path::{self, PathBuf};
 use std::process::{self, Command};
 use std::{
@@ -12,6 +12,70 @@ use std::{
 };
 
 const UNAVAILABLE: &str = "unavailable";
+
+const PATH_RUN: &str = "run";
+const PATH_SYS_CLASS_DMI_ID: &str = "sys/class/dmi/id";
+const PATH_SYS_HYPERVISOR: &str = "sys/hypervisor";
+const PATH_SYS_CLASS_BLOCK: &str = "sys/class/block";
+const PATH_DEV_DISK: &str = "dev/disk";
+const PATH_VAR_LIB_CLOUD: &str = "var/lib/cloud";
+const PATH_DI_CONFIG: &str = "etc/cloud/ds-identify.cfg";
+const PATH_PROC_CMDLINE: &str = "proc/cmdline";
+const PATH_PROC_1_CMDLINE: &str = "proc/1/cmdline";
+const PATH_PROC_1_ENVIRON: &str = "proc/1/environ";
+const PATH_PROC_UPTIME: &str = "proc/uptime";
+// let PATH_ETC_CLOUD=  get_env_var("PATH_ETC_CLOUD:-${PATH_ROOT}/etc/cloud}";
+// let PATH_ETC_CI_CFG=  get_env_var("PATH_ETC_CI_CFG:-${PATH_ETC_CLOUD}/cloud.cfg}";
+// let PATH_ETC_CI_CFG_D=  get_env_var("PATH_ETC_CI_CFG_D:-${PATH_ETC_CI_CFG}.d}";
+const PATH_RUN_CI: &str = "cloud-init";
+// let PATH_RUN_CI_CFG=${PATH_RUN_CI_CFG:-${PATH_RUN_CI}/cloud.cfg};
+// let PATH_RUN_DI_RESULT=${PATH_RUN_DI_RESULT:-${PATH_RUN_CI}/.ds-identify.result};
+
+const DI_DSLIST_DEFAULT: &str = "MAAS ConfigDrive NoCloud AltCloud Azure Bigstep \
+CloudSigma CloudStack DigitalOcean Vultr AliYun Ec2 GCE OpenNebula OpenStack \
+OVF SmartOS Scaleway Hetzner IBMCloud Oracle Exoscale RbxCloud UpCloud VMware \
+LXD NWCS";
+
+struct Paths {
+    root: PathBuf,
+
+    pub run: PathBuf,
+    pub proc_1_environ: PathBuf,
+    pub run_ci: PathBuf,
+}
+
+impl Paths {
+    fn with_root(root: &Path) -> Self {
+        Self {
+            root: PathBuf::from(root),
+            run: Self::compose_paths(root, PATH_RUN),
+            proc_1_environ: Self::compose_paths(root, PATH_PROC_1_ENVIRON),
+            run_ci: Self::compose_paths(root, PATH_RUN_CI),
+        }
+    }
+
+    fn compose_paths<P: AsRef<Path>>(root: P, default: &str) -> PathBuf {
+        root.as_ref().join(default)
+    }
+
+    fn path_from_env<P: AsRef<Path>>(root: P, name: &str, default: &str) -> PathBuf {
+        env::var(name).map_or_else(|_| Self::compose_paths(&root, &default), PathBuf::from)
+    }
+    pub fn from_env() -> Self {
+        let root = env::var("PATH_ROOT").unwrap_or_else(|_| String::from("/"));
+        let root = Path::new(&root);
+        let run = Self::path_from_env(root, "PATH_RUN", &PATH_RUN);
+        let proc_1_environ = Self::path_from_env(root, "PATH_PROC_1_ENVIRON", &PATH_PROC_1_ENVIRON);
+        let run_ci = Self::path_from_env(root, "PATH_RUN_CI", &PATH_RUN_CI);
+
+        Paths {
+            root: PathBuf::from(root),
+            run,
+            proc_1_environ,
+            run_ci,
+        }
+    }
+}
 
 fn error<S: AsRef<str>>(msg: S) {
     let msg = format!("Error: {}", msg.as_ref());
@@ -41,20 +105,69 @@ fn get_env_var<K: AsRef<OsStr>>(key: K, default: String) -> String {
     env::var(key).unwrap_or_else(|_| default)
 }
 
-fn collect_info(paths: &Paths) {
-    let uname_info = UnameInfo::read();
-    let virt = read_virt(&uname_info);
-    let pid1_prod_name = read_pid1_product_name(&paths.proc_1_environ);
-    let kernel_cmdline = read_kernel_cmdline();
-    let config = Config::read();
-    // read_datasource_list
-    // read_dmi_sys_vendor
-    // read_dmi_board_name
-    // read_dmi_chassis_asset_tag
-    // read_dmi_product_name
-    // read_dmi_product_serial
-    // read_dmi_product_uuid
-    // read_fs_info
+struct Info {
+    uname_info: UnameInfo,
+    virt: String,
+    pid1_prod_name: String,
+    kernel_cmdline: (),
+    config: Config,
+}
+
+impl Info {
+    fn collect_info(paths: &Paths) -> Self {
+        let uname_info = UnameInfo::read();
+        let virt = read_virt(&uname_info);
+        let pid1_prod_name = read_pid1_product_name(&paths.proc_1_environ);
+        let kernel_cmdline = read_kernel_cmdline();
+        let config = Config::read();
+        // read_datasource_list
+        // read_dmi_sys_vendor
+        // read_dmi_board_name
+        // read_dmi_chassis_asset_tag
+        // read_dmi_product_name
+        // read_dmi_product_serial
+        // read_dmi_product_uuid
+        // read_fs_info
+
+        Self {
+            uname_info,
+            virt,
+            pid1_prod_name,
+            kernel_cmdline,
+            config,
+        }
+    }
+
+    fn to_old_str(&self) -> String {
+        let mut string = String::new();
+        // TODO: DMI_PRODUCT_NAME
+        // TODO: DMI_SYS_VENDOR
+        // TODO: DMI_PRODUCT_SERIAL
+        // TODO: DMI_PRODUCT_UUID
+        // TODO: PID_1_PRODUCT_NAME
+        // TODO: DMI_CHASSIS_ASSET_TAG
+        // TODO: DMI_BOARD_NAME
+        // TODO: FS_LABELS
+        // TODO: ISO9660_DEVS
+        // TODO: KERNEL_CMDLINE VIRT
+        // TODO: UNAME_KERNEL_NAME
+        string.push_str(&format!(
+            "UNAME_KERNEL_NAME={}",
+            self.uname_info.kernel_name
+        ));
+        // TODO: UNAME_KERNEL_RELEASE
+        // TODO: UNAME_KERNEL_VERSION
+        // TODO: UNAME_MACHINE UNAME_NODENAME
+        // TODO: UNAME_OPERATING_SYSTEM
+        // TODO: DSNAME
+        // TODO: DSLIST
+        // TODO: MODE
+        // TODO: ON_FOUND
+        // TODO: ON_MAYBE
+        // TODO: ON_NOTFOUND
+
+        string
+    }
 }
 
 fn read_kernel_cmdline() {
@@ -117,8 +230,14 @@ fn read_pid1_product_name<T: AsRef<Path>>(proc_pid_1_environ: T) -> String {
     let buffered = BufReader::new(environ);
 
     // /proc/x/environ contain lines null terminated
-    for line in buffered.split(b'\0').map(|w| String::from_utf8(w)) {
-        let (key, value) = line.split_once('=');
+    for line in buffered
+        .split(b'\0')
+        .map(|w| String::from_utf8(w.unwrap()).unwrap())
+    {
+        let (key, value) = line.split_once('=').unwrap();
+        if key.to_lowercase() == "product_name" {
+            return value.to_string();
+        }
     }
 
     product_name
@@ -206,7 +325,7 @@ struct Config {
 }
 
 impl Config {
-    pub fn read() {
+    pub fn read() -> Self {
         todo!();
     }
 }
@@ -226,73 +345,15 @@ fn read_uptime<P: AsRef<Path>>(path: P) -> String {
     buf.split(' ').take(1).collect()
 }
 
-struct Paths {
-    root: PathBuf,
-
-    pub run: PathBuf,
-    pub proc_1_environ: PathBuf,
-}
-
-impl Paths {
-    fn compose_default<T: AsRef<str>, U: AsRef<str>>(root: T, default: U) -> PathBuf {
-        PathBuf::from(format!("{}{}", root.as_ref(), default.as_ref()))
-    }
-
-    pub fn new() -> Self {
-        let root = env::var("PATH_ROOT").unwrap_or_else(|_| String::from(""));
-        let run = env::var("PATH_RUN")
-            .map_or_else(|_| Self::compose_default(&root, "/run"), PathBuf::from);
-        let proc_1_environ = env::var("PATH_PROC_1_ENVIRON").map_or_else(
-            |_| Self::compose_default(&root, "/proc/1/environ"),
-            PathBuf::from,
-        );
-
-        Paths {
-            root: PathBuf::from(root),
-            run,
-            proc_1_environ,
-        }
-    }
-}
-
 fn _main() {
     // TODO: ensure_sane_path
 
     let args: Vec<String> = env::args().collect();
     let args_str: &str = &args[1..].join(" ");
 
-    let paths = Paths::new();
-    let PATH_ROOT = env::var("PATH_ROOT").unwrap_or_else(|_| String::from(""));
-    let PATH_RUN = get_env_var("PATH_RUN", format!("{PATH_ROOT}/run"));
-    let PATH_SYS_CLASS_DMI_ID = get_env_var(
-        "PATH_SYS_CLASS_DMI_ID",
-        format!("{PATH_ROOT}/sys/class/dmi/id"),
-    );
-    let PATH_SYS_HYPERVISOR =
-        get_env_var("PATH_SYS_HYPERVISOR", format!("{PATH_ROOT}/sys/hypervisor"));
-    let PATH_SYS_CLASS_BLOCK = get_env_var(
-        "PATH_SYS_CLASS_BLOCK",
-        format!("{PATH_ROOT}/sys/class/block"),
-    );
-    let PATH_DEV_DISK = get_env_var("PATH_DEV_DISK", format!("{PATH_ROOT}/dev/disk"));
-    let PATH_VAR_LIB_CLOUD =
-        get_env_var("PATH_VAR_LIB_CLOUD", format!("{PATH_ROOT}/var/lib/cloud"));
-    let PATH_DI_CONFIG = get_env_var(
-        "PATH_DI_CONFIG",
-        format!("{PATH_ROOT}/etc/cloud/ds-identify.cfg"),
-    );
-    let PATH_PROC_CMDLINE = get_env_var("PATH_PROC_CMDLINE", format!("{PATH_ROOT}/proc/cmdline"));
-    let PATH_PROC_1_CMDLINE =
-        get_env_var("PATH_PROC_1_CMDLINE", format!("{PATH_ROOT}/proc/1/cmdline"));
-    let PATH_PROC_UPTIME = get_env_var("PATH_PROC_UPTIME", format!("{PATH_ROOT}/proc/uptime"));
-    // let PATH_ETC_CLOUD=  get_env_var("PATH_ETC_CLOUD:-${PATH_ROOT}/etc/cloud}";
-    // let PATH_ETC_CI_CFG=  get_env_var("PATH_ETC_CI_CFG:-${PATH_ETC_CLOUD}/cloud.cfg}";
-    // let PATH_ETC_CI_CFG_D=  get_env_var("PATH_ETC_CI_CFG_D:-${PATH_ETC_CI_CFG}.d}";
-    let PATH_RUN_CI = get_env_var("PATH_RUN_CI", format!("{PATH_RUN}/cloud-init"));
-    // let PATH_RUN_CI_CFG=${PATH_RUN_CI_CFG:-${PATH_RUN_CI}/cloud.cfg};
-    // let PATH_RUN_DI_RESULT=${PATH_RUN_DI_RESULT:-${PATH_RUN_CI}/.ds-identify.result};
+    let paths = Paths::from_env();
 
-    let DI_LOG = get_env_var("DI_LOG", format!("{PATH_RUN_CI}/ds-identify.log"));
+    let DI_LOG = paths.run_ci.join("ds-identify.log");
 
     debug(
         1,
@@ -302,7 +363,15 @@ fn _main() {
         ),
     );
 
-    collect_info(&paths);
+    let info = Info::collect_info(&paths);
+
+    if DI_LOG.to_str().unwrap() == "stderr" {
+        todo!();
+    } else {
+        todo!("print to `DI_LOG`");
+        let old_cli_str = info.to_old_str();
+        println!("{old_cli_str}");
+    }
 }
 
 fn main() {
