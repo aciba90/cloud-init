@@ -1,16 +1,14 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, process::Command};
 
-type Field<'a> = Option<&'a str>;
-
-pub trait SMBIOS<'a> {
-    fn sys_vendor(&'a self) -> Field<'a>;
-}
+use crate::paths::Paths;
 
 enum Keys {
     SysVendor,
     ProductName,
     ProductUuid,
     ProductSerial,
+    ChassisAssetTag,
+    BoardName,
 }
 
 impl Keys {
@@ -20,42 +18,54 @@ impl Keys {
             Self::ProductName => "system-product-name",
             Self::ProductUuid => "system-uuid",
             Self::ProductSerial => "system-serial-number",
+            Self::ChassisAssetTag => "chassis-asset-tag",
+            Self::BoardName => panic!("asdfasdf"),
+        }
+    }
+
+    fn get_dmi_file(&self) -> &str {
+        match &self {
+            Self::SysVendor => "sys_vendor",
+            Self::ProductName => "product_name",
+            Self::ProductUuid => "product_uuid",
+            Self::ProductSerial => "product_serial",
+            Self::ChassisAssetTag => "chassis_asset_tag",
+            Self::BoardName => "board_name",
         }
     }
 }
 
-pub struct Dmi {
-    sys_vendor: Option<String>,
-    // board_name,
-    // chassis_asset_tag: Option<String>,
-    product_name: Option<String>,
-    product_serial: Option<String>,
-    product_uuid: Option<String>,
+pub struct SMBIOS {
+    pub sys_vendor: Option<String>,
+    pub board_name: Option<String>,
+    pub chassis_asset_tag: Option<String>,
+    pub product_name: Option<String>,
+    pub product_serial: Option<String>,
+    pub product_uuid: Option<String>,
 }
 
-impl<'a> SMBIOS<'a> for Dmi {
-    fn sys_vendor(&'a self) -> Field<'a> {
-        match &self.sys_vendor {
-            Some(x) => Some(&x),
-            None => None,
+impl SMBIOS {
+    pub fn from_kernel_name(kernel_name: &str, paths: &Paths) -> Self {
+        match kernel_name {
+            "FreeBSD" => todo!(),
+            _ => Self::read_from_dmi(&paths.sys_class_dmi_id),
         }
     }
-}
 
-impl Dmi {
-    pub fn read(sys_class_dmi_id: &Path) -> Self {
+    pub fn read_from_dmi(sys_class_dmi_id: &Path) -> Self {
         Self {
             sys_vendor: get_dmi_field(sys_class_dmi_id, Keys::SysVendor),
             product_name: get_dmi_field(sys_class_dmi_id, Keys::ProductName),
             product_uuid: get_dmi_field(sys_class_dmi_id, Keys::ProductUuid),
             product_serial: get_dmi_field(sys_class_dmi_id, Keys::ProductSerial),
+            chassis_asset_tag: get_dmi_field(sys_class_dmi_id, Keys::ChassisAssetTag),
+            board_name: get_dmi_field(sys_class_dmi_id, Keys::BoardName),
         }
     }
 }
 
 fn get_dmi_field(sys_class_dmi_id: &Path, key: Keys) -> Option<String> {
-    let key = key.get_dmi_field();
-    let path = sys_class_dmi_id.join(key);
+    let path = sys_class_dmi_id.join(key.get_dmi_file());
     if sys_class_dmi_id.is_dir() {
         if path.is_file() {
             return Some(fs::read_to_string(path).unwrap());
@@ -64,9 +74,33 @@ fn get_dmi_field(sys_class_dmi_id: &Path, key: Keys) -> Option<String> {
         // do *not* fallback to dmidecode!
         return None;
     }
-    dmi_decode(key)
+    dmi_decode(&key)
 }
 
-fn dmi_decode(sys_field: &str) -> Option<String> {
-    todo!("command");
+fn dmi_decode(sys_field: &Keys) -> Option<String> {
+    match &sys_field {
+        Keys::BoardName => return None,
+        _ => {
+            let key = sys_field.get_dmi_field();
+            match Command::new("dmidecode")
+                .arg("--quiet")
+                .arg(format!("--string={}", key))
+                .output()
+            {
+                Err(_) => {
+                    // TODO: log error
+                    None
+                }
+                Ok(out) => {
+                    // TODO: check status
+                    // XXX: simplify this
+                    Some(
+                        std::str::from_utf8(&out.stdout)
+                            .expect("valid string")
+                            .to_string(),
+                    )
+                }
+            }
+        }
+    }
 }

@@ -7,7 +7,7 @@ use std::{env, fs, path};
 
 use crate::constants::{DI_DISABLED, DI_ENABLED, UNAVAILABLE};
 use crate::paths::Paths;
-use crate::smbios::{Dmi, SMBIOS};
+use crate::smbios::SMBIOS;
 use crate::util::{debug, parse_yaml_array, unquote};
 
 pub struct Info {
@@ -17,7 +17,7 @@ pub struct Info {
     kernel_cmdline: String,
     config: Config,
     dslist: DatasourceList,
-    smbios: Box<dyn SMBIOS<'static>>,
+    smbios: SMBIOS,
 }
 
 impl Info {
@@ -28,10 +28,7 @@ impl Info {
         let kernel_cmdline = Self::read_kernel_cmdline(&paths, virt.is_container());
         let config = Config::read(&paths, &kernel_cmdline, &uname_info);
         let dslist = DatasourceList::read(&paths);
-        let smbios = match uname_info.kernel_name.as_str() {
-            "FreeBSD" => todo!(),
-            _ => Box::new(Dmi::read(&paths.sys_class_dmi_id)),
-        };
+        let smbios = SMBIOS::from_kernel_name(uname_info.kernel_name.as_str(), &paths);
         // read_dmi_sys_vendor
         // read_dmi_board_name
         // read_dmi_chassis_asset_tag
