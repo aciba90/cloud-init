@@ -5,10 +5,10 @@ use std::path::Path;
 use std::process::Command;
 use std::{env, fs, path};
 
-use crate::constants::{DI_DISABLED, DI_ENABLED, UNAVAILABLE};
+use crate::constants::{DI_DISABLED, DI_ENABLED, UNAVAILABLE, DI_DSLIST_DEFAULT, };
 use crate::paths::Paths;
 use crate::smbios::SMBIOS;
-use crate::util::{debug, parse_yaml_array, unquote};
+use crate::util::{debug, parse_yaml_array, unquote, error};
 
 pub struct Info {
     uname_info: UnameInfo,
@@ -18,24 +18,20 @@ pub struct Info {
     config: Config,
     dslist: DatasourceList,
     smbios: SMBIOS,
+    fs_info: FSInfo,
 }
 
 impl Info {
     pub fn collect_info(paths: &Paths) -> Self {
         let uname_info = UnameInfo::read();
         let virt = Virt::from(&uname_info);
+        let is_container = virt.is_container();
         let pid1_prod_name = Self::read_pid1_product_name(&paths.proc_1_environ);
-        let kernel_cmdline = Self::read_kernel_cmdline(&paths, virt.is_container());
+        let kernel_cmdline = Self::read_kernel_cmdline(&paths, is_container);
         let config = Config::read(&paths, &kernel_cmdline, &uname_info);
         let dslist = DatasourceList::read(&paths);
         let smbios = SMBIOS::from_kernel_name(uname_info.kernel_name.as_str(), &paths);
-        // read_dmi_sys_vendor
-        // read_dmi_board_name
-        // read_dmi_chassis_asset_tag
-        // read_dmi_product_name
-        // read_dmi_product_serial
-        // read_dmi_product_uuid
-        // read_fs_info
+        let fs_info = FSInfo::read_linux(&is_container);
 
         Self {
             uname_info,
@@ -45,6 +41,7 @@ impl Info {
             config,
             dslist,
             smbios,
+            fs_info,
         }
     }
 
@@ -54,13 +51,13 @@ impl Info {
 
     pub fn to_old_str(&self) -> String {
         let mut string = String::new();
-        // TODO: DMI_PRODUCT_NAME
-        // TODO: DMI_SYS_VENDOR
-        // TODO: DMI_PRODUCT_SERIAL
-        // TODO: DMI_PRODUCT_UUID
-        // TODO: PID_1_PRODUCT_NAME
-        // TODO: DMI_CHASSIS_ASSET_TAG
-        // TODO: DMI_BOARD_NAME
+        string.push_str(&format!("DMI_PRODUCT_NAME={:?}\n", self.smbios.product_name));
+        string.push_str(&format!("DMI_SYS_VENDOR={:?}\n", self.smbios.sys_vendor));
+        string.push_str(&format!("DMI_PRODUCT_SERIAL={:?}\n", self.smbios.product_serial));
+        string.push_str(&format!("DMI_PRODUCT_UUID={:?}\n", self.smbios.product_uuid));
+        string.push_str(&format!("PID_1_PRODUCT_NAME={}\n", self.pid1_prod_name));
+        string.push_str(&format!("DMI_CHASSIS_ASSET_TAG={:?}\n", self.smbios.chassis_asset_tag));
+        string.push_str(&format!("DMI_BOARD_NAME={:?}\n", self.smbios.board_name));
         // TODO: FS_LABELS
         // TODO: ISO9660_DEVS
         // TODO: KERNEL_CMDLINE VIRT
@@ -528,6 +525,7 @@ fn check_config<'a, P: AsRef<Path>>(key: &str, paths: &'a [P]) -> Option<(String
     value_path
 }
 
+// XXX: refactor Strings -> enums
 struct DatasourceList(Vec<String>);
 
 impl DatasourceList {
@@ -559,7 +557,7 @@ impl DatasourceList {
             return Self(dslist);
         };
 
-        todo!("default");
+        DatasourceList::default()
     }
 
     fn found() {
@@ -567,8 +565,85 @@ impl DatasourceList {
     }
 }
 
+impl Default for DatasourceList {
+    fn default() -> Self {
+        Self (
+            DI_DSLIST_DEFAULT.split(' ').map(str::to_string).collect()
+        )
+    }
+}
+
 impl From<&str> for DatasourceList {
     fn from(value: &str) -> Self {
         Self(value.split_whitespace().map(|s| s.to_owned()).collect())
     }
+}
+
+#[derive(Debug)]
+pub struct FSInfo {
+    fs_labels: String,
+    iso9660_devs: String,
+    fs_uuids: Option<String>,
+}
+
+impl FSInfo {
+
+    pub fn read_linux(is_container: &bool) -> Self {
+        // do not rely on links in /dev/disk which might not be present yet.
+        // Note that blkid < 2.22 (centos6, trusty) do not output DEVNAME.
+        // that means that DI_ISO9660_DEVS will not be set.
+        if *is_container {
+            let unavailable_container = format!("{}:container", UNAVAILABLE);
+            // blkid will in a container, or at least currently in lxd
+            // not provide useful information.
+            return Self {
+                fs_labels: unavailable_container.clone(),
+                iso9660_devs: unavailable_container.clone(),
+                fs_uuids: None
+            };
+        };
+
+        let blkid_export_out = Self::blkid_export();
+        if let None = blkid_export_out {
+            let unavailable_error = format!("{}:error", UNAVAILABLE);
+            return Self {
+                fs_labels: unavailable_error.clone(),
+                iso9660_devs: unavailable_error.clone(),
+                fs_uuids: Some(unavailable_error.clone()),
+            };
+        };
+
+        let Some(blkid_export_out) = blkid_export_out;
+        for line in blkid_export_out.split(&['\t', '\n']).flat_map(|s| s.split_whitespace()) {
+            dbg!(&line);
+            if line.starts_with("DEVNAME=") {
+                todo!();
+            }
+            else if line.starts_with("LABEL=") || line.starts_with("LABEL_FATBOOT=") {
+                todo!();
+            }
+            else if line.starts_with("TYPE=") {
+                todo!();
+            }
+            else if line.starts_with("UUID=") {
+                todo!();
+            }
+
+        }
+
+        todo!("parse blkid info");
+    }
+
+    fn blkid_export() -> Option<String> {
+
+        let output = Command::new("blkid").args(["-c /dev/null -o export"]).output().expect("failed to execute blkid");
+        if !output.status.success() {
+            let ret = output.status.code().map_or("?".to_string(), |c| c.to_string());
+            error(&format!("failed running [{}]: blokid -c /dev/null -o export", ret));
+            None
+        } else {
+            Some(String::from_utf8(output.stdout).expect("valid utf8 output"))
+        }
+    }
+
 }
