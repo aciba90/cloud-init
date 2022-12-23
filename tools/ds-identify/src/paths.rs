@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Paths {
     root: PathBuf,
     pub run: PathBuf,

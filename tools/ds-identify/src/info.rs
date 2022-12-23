@@ -1,6 +1,6 @@
 use std::fmt::Display;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, BufWriter, Write};
 use std::path::Path;
 use std::process::Command;
 use std::{env, fs, path};
@@ -11,6 +11,7 @@ use crate::smbios::SMBIOS;
 use crate::util::{debug, error, parse_yaml_array, unquote};
 
 pub struct Info {
+    paths: Paths,
     uname_info: UnameInfo,
     virt: Virt,
     pid1_prod_name: String,
@@ -34,6 +35,7 @@ impl Info {
         let fs_info = FSInfo::read_linux(&is_container);
 
         Self {
+            paths: paths.clone(),
             uname_info,
             virt,
             pid1_prod_name,
@@ -136,6 +138,30 @@ impl Info {
         } else {
             return format!("{UNAVAILABLE}:no-cmdline");
         };
+    }
+
+    pub fn write_result(&self, input: &str) {
+        let runcfg = &self.paths.run_ci_cfg;
+        let error_fn = || {
+            error(format!("failed to write to {:?}", runcfg));
+            panic!("failed to write to {:?}", runcfg);
+        };
+
+        let file = fs::File::open(&self.paths.run_ci_cfg);
+        let mut ostream = match file {
+            Err(_) => error_fn(),
+            Ok(file) => BufWriter::new(file),
+
+        };
+        
+            let pre = match self.config.mode() {
+                Mode::Report => "  ",
+                _ => "",
+            };
+        for line in input.lines() {
+            writeln!(ostream, "{}{}", pre, line).unwrap();
+        }
+
     }
 }
 

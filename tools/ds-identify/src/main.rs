@@ -45,8 +45,11 @@ fn write_result(content: &str, paths: &Paths, mode: &Mode) {
     }
 }
 
-fn found(ds_list: &[&str]) {
-    todo!();
+fn found(info: &Info, ds_list: &[&str]) {
+    let list = ds_list.join(", ");
+    // TODO: Add ds None as fallback
+    let result = format!("datasource_list: [{}]", list);
+    info.write_result(&result);
 }
 
 fn _main() {
@@ -99,7 +102,7 @@ fn _main() {
 
     if let Some(dsname) = info.config().dsname() {
         debug(1, format!("datasource '{dsname}' specified."));
-        found(&[dsname]);
+        found(&info, &[dsname]);
         return;
     }
 
