@@ -5,10 +5,10 @@ use std::path::Path;
 use std::process::Command;
 use std::{env, fs, path};
 
-use crate::constants::{DI_DISABLED, DI_ENABLED, UNAVAILABLE, DI_DSLIST_DEFAULT, };
+use crate::constants::{DI_DISABLED, DI_DSLIST_DEFAULT, DI_ENABLED, UNAVAILABLE};
 use crate::paths::Paths;
 use crate::smbios::SMBIOS;
-use crate::util::{debug, parse_yaml_array, unquote, error};
+use crate::util::{debug, error, parse_yaml_array, unquote};
 
 pub struct Info {
     uname_info: UnameInfo,
@@ -51,31 +51,55 @@ impl Info {
 
     pub fn to_old_str(&self) -> String {
         let mut string = String::new();
-        string.push_str(&format!("DMI_PRODUCT_NAME={:?}\n", self.smbios.product_name));
+        string.push_str(&format!(
+            "DMI_PRODUCT_NAME={:?}\n",
+            self.smbios.product_name
+        ));
         string.push_str(&format!("DMI_SYS_VENDOR={:?}\n", self.smbios.sys_vendor));
-        string.push_str(&format!("DMI_PRODUCT_SERIAL={:?}\n", self.smbios.product_serial));
-        string.push_str(&format!("DMI_PRODUCT_UUID={:?}\n", self.smbios.product_uuid));
+        string.push_str(&format!(
+            "DMI_PRODUCT_SERIAL={:?}\n",
+            self.smbios.product_serial
+        ));
+        string.push_str(&format!(
+            "DMI_PRODUCT_UUID={:?}\n",
+            self.smbios.product_uuid
+        ));
         string.push_str(&format!("PID_1_PRODUCT_NAME={}\n", self.pid1_prod_name));
-        string.push_str(&format!("DMI_CHASSIS_ASSET_TAG={:?}\n", self.smbios.chassis_asset_tag));
+        string.push_str(&format!(
+            "DMI_CHASSIS_ASSET_TAG={:?}\n",
+            self.smbios.chassis_asset_tag
+        ));
         string.push_str(&format!("DMI_BOARD_NAME={:?}\n", self.smbios.board_name));
-        // TODO: FS_LABELS
-        // TODO: ISO9660_DEVS
-        // TODO: KERNEL_CMDLINE VIRT
-        // TODO: UNAME_KERNEL_NAME
+        string.push_str(&format!("FS_LABELS={:?}\n", self.fs_info.fs_labels));
+        string.push_str(&format!("ISO9660_DEVS={:?}\n", self.fs_info.iso9660_devs));
+        string.push_str(&format!("KERNEL_CMD_LINE={}\n", self.kernel_cmdline));
+        string.push_str(&format!("VIRT={:?}\n", self.virt));
         string.push_str(&format!(
             "UNAME_KERNEL_NAME={}",
             self.uname_info.kernel_name
         ));
-        // TODO: UNAME_KERNEL_RELEASE
-        // TODO: UNAME_KERNEL_VERSION
-        // TODO: UNAME_MACHINE UNAME_NODENAME
-        // TODO: UNAME_OPERATING_SYSTEM
-        // TODO: DSNAME
-        // TODO: DSLIST
-        // TODO: MODE
-        // TODO: ON_FOUND
-        // TODO: ON_MAYBE
-        // TODO: ON_NOTFOUND
+        string.push_str(&format!(
+            "UNAME_KERNEL_RELEASE={}\n",
+            self.uname_info.kernel_release
+        ));
+        string.push_str(&format!(
+            "UNAME_KERNEL_VERSION={}\n",
+            self.uname_info.kernel_version
+        ));
+        string.push_str(&format!("UNAME_MACHINE={}\n", self.uname_info.machine));
+        string.push_str(&format!("UNAME_NODENAME={}\n", self.uname_info.node_name));
+        string.push_str(&format!(
+            "UNAME_OPERATING_SYSTEM={}\n",
+            self.uname_info.operating_system
+        ));
+        string.push_str(&format!("DSNAME={:?}\n", self.config.dsname));
+        string.push_str(&format!("DSLIST={:?}\n", self.dslist));
+        string.push_str(&format!("MODE={}\n", self.config.mode));
+        string.push_str(&format!("ON_FOUND={:?}\n", self.config.on_found));
+        string.push_str(&format!("ON_MAYBE={:?}\n", self.config.on_maybe));
+        string.push_str(&format!("ON_NOTFOUND={:?}\n", self.config.on_notfound));
+
+        // TODO: pid, ppid, is_container
 
         string
     }
@@ -166,6 +190,7 @@ impl UnameInfo {
     }
 }
 
+#[derive(Debug)]
 pub struct Virt(String);
 
 impl Virt {
@@ -526,6 +551,7 @@ fn check_config<'a, P: AsRef<Path>>(key: &str, paths: &'a [P]) -> Option<(String
 }
 
 // XXX: refactor Strings -> enums
+#[derive(Debug)]
 struct DatasourceList(Vec<String>);
 
 impl DatasourceList {
@@ -567,9 +593,7 @@ impl DatasourceList {
 
 impl Default for DatasourceList {
     fn default() -> Self {
-        Self (
-            DI_DSLIST_DEFAULT.split(' ').map(str::to_string).collect()
-        )
+        Self(DI_DSLIST_DEFAULT.split(' ').map(str::to_string).collect())
     }
 }
 
@@ -587,7 +611,6 @@ pub struct FSInfo {
 }
 
 impl FSInfo {
-
     pub fn read_linux(is_container: &bool) -> Self {
         // do not rely on links in /dev/disk which might not be present yet.
         // Note that blkid < 2.22 (centos6, trusty) do not output DEVNAME.
@@ -599,51 +622,92 @@ impl FSInfo {
             return Self {
                 fs_labels: unavailable_container.clone(),
                 iso9660_devs: unavailable_container.clone(),
-                fs_uuids: None
+                fs_uuids: None,
             };
         };
 
         let blkid_export_out = Self::blkid_export();
-        if let None = blkid_export_out {
-            let unavailable_error = format!("{}:error", UNAVAILABLE);
-            return Self {
-                fs_labels: unavailable_error.clone(),
-                iso9660_devs: unavailable_error.clone(),
-                fs_uuids: Some(unavailable_error.clone()),
-            };
-        };
+        match blkid_export_out {
+            None => {
+                let unavailable_error = format!("{}:error", UNAVAILABLE);
+                Self {
+                    fs_labels: unavailable_error.clone(),
+                    iso9660_devs: unavailable_error.clone(),
+                    fs_uuids: Some(unavailable_error.clone()),
+                }
+            }
+            Some(blkid_export_out) => {
+                let delim = ',';
 
-        let Some(blkid_export_out) = blkid_export_out;
-        for line in blkid_export_out.split(&['\t', '\n']).flat_map(|s| s.split_whitespace()) {
-            dbg!(&line);
-            if line.starts_with("DEVNAME=") {
-                todo!();
-            }
-            else if line.starts_with("LABEL=") || line.starts_with("LABEL_FATBOOT=") {
-                todo!();
-            }
-            else if line.starts_with("TYPE=") {
-                todo!();
-            }
-            else if line.starts_with("UUID=") {
-                todo!();
-            }
+                let mut labels = String::new();
+                let mut uuids = String::new();
+                let mut isodevs = String::new();
+                let mut ftype = None;
+                let mut dev = None;
+                let mut label = None;
+                for line in blkid_export_out.lines() {
+                    dbg!(&line);
+                    if let Some((_, value)) = line.split_once("DEVNAME=") {
+                        if let Some(dev_prev) = dev {
+                            if matches!(ftype, Some("iso9660")) {
+                                isodevs.push_str(&format!("{}={}", dev_prev, label.unwrap_or("")));
+                                isodevs.push(delim);
+                            }
+                            ftype = None;
+                            label = None;
+                            dev = Some(value);
+                        }
+                    } else if line.starts_with("LABEL=") || line.starts_with("LABEL_FATBOOT=") {
+                        let value = match line.split_once("LABEL=") {
+                            Some((_, value)) => value,
+                            None => match line.split_once("LABEL_FATBOOT=") {
+                                None => panic!("One should match!"),
+                                Some((_, value)) => value,
+                            },
+                        };
+                        labels.push_str(value);
+                        labels.push(delim);
+                    } else if let Some((_, value)) = line.split_once("TYPE=") {
+                        ftype = Some(value);
+                    } else if let Some((_, value)) = line.split_once("UUID=") {
+                        uuids.push_str(value);
+                        uuids.push(delim);
+                    }
+                }
 
+                if let Some(dev_prev) = dev {
+                    if matches!(ftype, Some("iso9660")) {
+                        isodevs.push_str(&format!("{}={}", dev_prev, label.unwrap_or("")));
+                        isodevs.push(delim);
+                    }
+                }
+
+                Self {
+                    fs_labels: labels,
+                    fs_uuids: Some(uuids),
+                    iso9660_devs: isodevs,
+                }
+            }
         }
-
-        todo!("parse blkid info");
     }
 
     fn blkid_export() -> Option<String> {
-
-        let output = Command::new("blkid").args(["-c /dev/null -o export"]).output().expect("failed to execute blkid");
+        let output = Command::new("blkid")
+            .args(["-c /dev/null -o export"])
+            .output()
+            .expect("failed to execute blkid");
         if !output.status.success() {
-            let ret = output.status.code().map_or("?".to_string(), |c| c.to_string());
-            error(&format!("failed running [{}]: blokid -c /dev/null -o export", ret));
+            let ret = output
+                .status
+                .code()
+                .map_or("?".to_string(), |c| c.to_string());
+            error(&format!(
+                "failed running [{}]: blokid -c /dev/null -o export",
+                ret
+            ));
             None
         } else {
             Some(String::from_utf8(output.stdout).expect("valid utf8 output"))
         }
     }
-
 }

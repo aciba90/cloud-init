@@ -131,13 +131,13 @@ impl Paths {
         let mut cfg_paths = vec![self.etc_ci_cfg.clone()];
 
         if self.etc_ci_cfg.is_dir() {
-        for entry in self.etc_ci_cfg_d.read_dir().unwrap() {
-            let entry = entry.unwrap().path();
-            if !entry.ends_with(".cfg") {
-                continue;
+            for entry in self.etc_ci_cfg_d.read_dir().unwrap() {
+                let entry = entry.unwrap().path();
+                if !entry.ends_with(".cfg") {
+                    continue;
+                }
+                cfg_paths.push(entry.into());
             }
-            cfg_paths.push(entry.into());
-        }
         }
 
         cfg_paths

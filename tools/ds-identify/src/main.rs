@@ -45,6 +45,10 @@ fn write_result(content: &str, paths: &Paths, mode: &Mode) {
     }
 }
 
+fn found(ds_list: &[&str]) {
+    todo!();
+}
+
 fn _main() {
     // TODO: ensure_sane_path
 
@@ -95,7 +99,7 @@ fn _main() {
 
     if let Some(dsname) = info.config().dsname() {
         debug(1, format!("datasource '{dsname}' specified."));
-        // TODO: found
+        found(&[dsname]);
         return;
     }
 
