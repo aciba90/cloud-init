@@ -6,6 +6,7 @@ use std::process::Command;
 use std::{env, fs, path};
 
 use crate::constants::{DI_DISABLED, DI_DSLIST_DEFAULT, DI_ENABLED, UNAVAILABLE};
+use crate::dss::Datasource;
 use crate::paths::Paths;
 use crate::smbios::SMBIOS;
 use crate::util::{debug, error, parse_yaml_array, unquote};
@@ -49,6 +50,10 @@ impl Info {
 
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    pub fn dslist(&self) -> &DatasourceList {
+        &self.dslist
     }
 
     pub fn to_old_str(&self) -> String {
@@ -95,7 +100,7 @@ impl Info {
             self.uname_info.operating_system
         ));
         string.push_str(&format!("DSNAME={:?}\n", self.config.dsname));
-        string.push_str(&format!("DSLIST={:?}\n", self.dslist));
+        string.push_str(&format!("DSLIST={}\n", self.dslist.to_old_str()));
         string.push_str(&format!("MODE={}\n", self.config.mode));
         string.push_str(&format!("ON_FOUND={:?}\n", self.config.on_found));
         string.push_str(&format!("ON_MAYBE={:?}\n", self.config.on_maybe));
@@ -578,7 +583,7 @@ fn check_config<'a, P: AsRef<Path>>(key: &str, paths: &'a [P]) -> Option<(String
 
 // XXX: refactor Strings -> enums
 #[derive(Debug)]
-struct DatasourceList(Vec<String>);
+pub struct DatasourceList(Vec<Datasource>);
 
 impl DatasourceList {
     fn read(paths: &Paths) -> Self {
@@ -605,27 +610,42 @@ impl DatasourceList {
                 format!("{:?} set datasource_list: {}", path, found_dslist),
             );
             let dslist = parse_yaml_array(&found_dslist);
-            let dslist = dslist.iter().map(|x| x.to_string()).collect();
+            let dslist = dslist.iter().map(|x| (*x).into()).collect();
             return Self(dslist);
         };
 
         DatasourceList::default()
     }
 
-    fn found() {
-        todo!();
+    /// determines if there is only a single non-none ds entry or not
+    pub fn only_one_not_none(&self) -> bool {
+        if self.0.len() == 1 {
+            return true;
+        }
+        if self.0.len() == 2 && matches!(self.0.last().expect("an element"), Datasource::None) {
+            return true;
+        }
+        false
+    }
+
+    pub fn to_old_str(&self) -> String {
+        self.0.iter().map(|x| String::from(x)).collect::<Vec<_>>().join(" ")
+    }
+
+    pub fn as_old_list(&self) -> Vec<String> {
+        self.0.iter().map(|ds| ds.into()).collect::<Vec<_>>()
     }
 }
 
 impl Default for DatasourceList {
     fn default() -> Self {
-        Self(DI_DSLIST_DEFAULT.split(' ').map(str::to_string).collect())
+        Self(DI_DSLIST_DEFAULT.split(' ').map(|s| s.into()).collect())
     }
 }
 
 impl From<&str> for DatasourceList {
     fn from(value: &str) -> Self {
-        Self(value.split_whitespace().map(|s| s.to_owned()).collect())
+        Self(value.split_whitespace().map(|s| s.into()).collect())
     }
 }
 

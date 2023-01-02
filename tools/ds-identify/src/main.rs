@@ -24,10 +24,6 @@ fn read_uptime<P: AsRef<Path>>(path: P) -> String {
     buf.split(' ').take(1).collect()
 }
 
-enum Datasource {
-    NoCloud,
-}
-
 fn is_manual_clean_and_exiting(var_lib_cloud: &Path) -> bool {
     var_lib_cloud.join("instance/manual-clean").is_file()
 }
@@ -45,8 +41,8 @@ fn write_result(content: &str, paths: &Paths, mode: &Mode) {
     }
 }
 
-fn found(info: &Info, ds_list: &[&str]) {
-    let list = ds_list.join(", ");
+fn found<S: AsRef<str>>(info: &Info, ds_list: &[S]) {
+    let list = ds_list.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", ");
     // TODO: Add ds None as fallback
     let result = format!("datasource_list: [{}]", list);
     info.write_result(&result);
@@ -112,7 +108,29 @@ fn _main() {
             "manual_cache_clean enabled. Not writing datasource_list.",
         );
         write_result("# manual_cache_clean.", &paths, info.config().mode());
+        return;
     }
+
+    // if there is only a single entry in $DI_DSLIST
+    if info.dslist().only_one_not_none() {
+        debug(
+            1,
+            format!("single entry in datasource_list ({}) use that.",
+                info.dslist().to_old_str(),
+            )
+        );
+        let ds_list = info.dslist().as_old_list();
+        found(&info, &ds_list);
+        return;
+    }
+
+    // Check datasources
+    /*
+    for ds in info.dslist() {
+
+    }
+    */
+
 }
 
 fn main() {
