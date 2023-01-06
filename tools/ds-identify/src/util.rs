@@ -8,6 +8,17 @@ use std::{
     path,
 };
 
+pub fn ensure_sane_path() {
+    let mut path = env::var("PATH").expect("$PATH set");
+    for p in &["/sbin", "/usr/sbin", "/bin", "/usr/bin"] {
+        if path.contains(&format!(":{}:", p)) || path.contains(&format!(":{}:/", p)) {
+            continue;
+        }
+        path.push(':');
+        path.push_str(p);
+    }
+}
+
 /// Remove quotes from quoted value.
 pub fn unquote(val: &str) -> &str {
     const QUOTE: char = '"';
@@ -79,8 +90,11 @@ impl Logger {
             }
             _ => {
                 dbg!("log to file: {}", log_file);
-                // TODO: append mode
-                let file = fs::File::create(log_file).unwrap();
+                let file = fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(log_file)
+                    .unwrap();
                 BufWriter::new(Box::new(file))
             }
         };

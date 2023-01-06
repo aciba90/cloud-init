@@ -787,7 +787,7 @@ impl FSInfo {
                 .code()
                 .map_or("?".to_string(), |c| c.to_string());
             logger.error(&format!(
-                "failed running [{}]: blokid -c /dev/null -o export",
+                "failed running [{}]: blkid -c /dev/null -o export",
                 ret
             ));
             None

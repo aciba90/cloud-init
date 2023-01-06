@@ -4,7 +4,7 @@ use ds_identify::constants::UNAVAILABLE;
 use ds_identify::dss::{Datasource, DscheckResult};
 use ds_identify::info::{DatasourceList, Found, Info, Maybe, Mode, NotFound};
 use ds_identify::paths::Paths;
-use ds_identify::util::{get_env_var, Logger};
+use ds_identify::util::{ensure_sane_path, get_env_var, Logger};
 use std::process::ExitCode;
 use std::{env, fs, path::Path};
 
@@ -35,9 +35,12 @@ fn write_result(logger: &Logger, content: &str, paths: &Paths, mode: &Mode) {
         panic!("failed to write to {:?}", runcfg);
     };
 
-    let file = fs::File::open(&paths.run_ci_cfg);
+    let file = fs::File::create(&paths.run_ci_cfg);
     let mut ostream = match file {
-        Err(_) => error_fn(),
+        Err(e) => {
+            eprintln!("{}", e);
+            error_fn()
+        }
         Ok(file) => BufWriter::new(file),
     };
 
@@ -101,26 +104,8 @@ fn print_info() {
     println!("{}", info.to_old_str());
 }
 
-fn _main() -> ExitCode {
-    // TODO: ensure_sane_path
-
-    let args: Vec<String> = env::args().collect();
-    let args_str: &str = &args[1..].join(" ");
-
-    let paths = Paths::from_env();
-    let di_log = paths.log();
-    let logger = Logger::new(&di_log);
-
-    logger.debug(
-        1,
-        format!(
-            "[up {}s] ds-identify {args_str}",
-            read_uptime(&paths.proc_uptime)
-        ),
-    );
-
-    let info = Info::collect_info(&logger, &paths);
-
+fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
+    let di_log = info.paths().log();
     if di_log == "stderr" {
         todo!();
     } else {
@@ -138,14 +123,14 @@ fn _main() -> ExitCode {
                 1,
                 format!("mode={}. returning {}", Mode::Disabled, RET_DISABLED),
             );
-            return ExitCode::from(RET_DISABLED);
+            return RET_DISABLED;
         }
         Mode::Enabled => {
             logger.debug(
                 1,
                 format!("mode={}. returning {}", Mode::Enabled, RET_ENABLED),
             );
-            return ExitCode::from(RET_ENABLED);
+            return RET_ENABLED;
         }
         _ => (),
     }
@@ -153,10 +138,10 @@ fn _main() -> ExitCode {
     if let Some(dsname) = info.config().dsname() {
         logger.debug(1, format!("datasource '{dsname}' specified."));
         found(&info, None, &[dsname], None);
-        return ExitCode::SUCCESS;
+        return 0;
     }
 
-    if is_manual_clean_and_exiting(&paths.var_lib_cloud) {
+    if is_manual_clean_and_exiting(&info.paths().var_lib_cloud) {
         logger.debug(
             1,
             "manual_cache_clean enabled. Not writing datasource_list.",
@@ -164,10 +149,10 @@ fn _main() -> ExitCode {
         write_result(
             &logger,
             "# manual_cache_clean.",
-            &paths,
+            info.paths(),
             info.config().mode(),
         );
-        return ExitCode::SUCCESS;
+        return 0;
     }
 
     // if there is only a single entry in $DI_DSLIST
@@ -181,7 +166,7 @@ fn _main() -> ExitCode {
         );
         let ds_list = info.dslist().as_old_list();
         found(&info, None, &ds_list, None);
-        return ExitCode::SUCCESS;
+        return 0;
     }
 
     // Check datasources
@@ -240,9 +225,9 @@ fn _main() -> ExitCode {
             if let Found::First = info.config().on_found {
                 found_dss.keep_first();
             }
-            found(&info, None, &found_dss.as_old_list(), Some(&exfound));
-            return ExitCode::SUCCESS;
         }
+        found(&info, None, &found_dss.as_old_list(), Some(&exfound));
+        return 0;
     }
 
     if maybe_dss.len() > 0 && !matches!(info.config().on_maybe, Maybe::None) {
@@ -255,7 +240,7 @@ fn _main() -> ExitCode {
             ),
         );
         found(&info, None, &maybe_dss.as_old_list(), Some(&exmaybe));
-        return ExitCode::SUCCESS;
+        return 0;
     }
 
     // record the empty result.
@@ -290,13 +275,94 @@ fn _main() -> ExitCode {
         }
     };
     logger.debug(1, msg);
+    ret_code
+}
+
+fn ds_identify() -> ExitCode {
+    ensure_sane_path();
+
+    let paths = Paths::from_env();
+    let di_log = paths.log();
+    let logger = Logger::new(&di_log);
+
+    let args: Vec<String> = env::args().skip(1).collect();
+    let args_str: &str = &args.join(" ");
+
+    logger.debug(
+        1,
+        format!(
+            "[up {}s] ds-identify {}",
+            read_uptime(&paths.proc_uptime),
+            args_str,
+        ),
+    );
+
+    let info = Info::collect_info(&logger, &paths);
+
+    if !paths.run_ci.is_dir() {
+        fs::create_dir_all(&paths.run_ci).unwrap();
+    }
+
+    // Handle cache
+    let force = if let Some(first_arg) = args.get(1) {
+        first_arg == "--force"
+    } else {
+        false
+    };
+    if !force && paths.run_ci_cfg.is_file() && paths.run_di_result.is_file() {
+        if let Ok(previous_code) = fs::read_to_string(&paths.run_di_result) {
+            let previous_code = previous_code.trim();
+            match previous_code {
+                "0" | "1" => {
+                    logger.debug(
+                        2,
+                        format!(
+                            "used cached result {}. pass --force to re-run.",
+                            &previous_code
+                        ),
+                    );
+                    return ExitCode::from(previous_code.parse::<u8>().expect("valid exit_code"));
+                }
+                _ => {
+                    logger.debug(
+                        1,
+                        format!(
+                            "prevous run returned unexpected '{}'. Re-running.",
+                            &previous_code
+                        ),
+                    );
+                }
+            }
+        } else {
+            logger.error(format!(
+                "failed to read result from {}",
+                paths.run_di_result.display()
+            ));
+        }
+    }
+
+    let ret_code = ds_identify_inner(&logger, &info);
+
+    let mut result_file =
+        fs::File::create(&info.paths().run_di_result).expect("accessible result file");
+    write!(result_file, "{}", ret_code).expect("result file accessible");
+
+    logger.debug(
+        1,
+        format!(
+            "[up {}s] returning {}",
+            read_uptime(&paths.proc_uptime),
+            ret_code,
+        ),
+    );
+
     ExitCode::from(ret_code)
 }
 
 fn main() -> ExitCode {
     let di_main = get_env_var("DI_MAIN", String::from("main"));
     match &di_main[..] {
-        "main" => _main(),
+        "main" => ds_identify(),
         "print_info" => {
             print_info();
             ExitCode::SUCCESS
