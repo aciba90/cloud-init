@@ -45,6 +45,12 @@ pub fn error<S: AsRef<str>>(msg: S) {
     eprintln!("{}", &msg);
 }
 
+pub fn warn<S: AsRef<str>>(msg: S) {
+    let msg = format!("WARN: {}", msg.as_ref());
+    debug(0, &msg);
+    eprintln!("{}", &msg);
+}
+
 // TODO: as macro
 pub fn debug<S: AsRef<str>>(level: i32, msg: S) {
     // TODO: Find a way to not recompute this value in every call

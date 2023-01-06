@@ -7,7 +7,7 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub struct Paths {
-    root: PathBuf,
+    pub root: PathBuf,
     pub run: PathBuf,
     pub sys_class_dmi_id: PathBuf,
     pub var_lib_cloud: PathBuf,

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::process::Command;
 use std::{env, fs, path};
@@ -48,12 +48,28 @@ impl Info {
         }
     }
 
+    pub fn paths(&self) -> &Paths {
+        &self.paths
+    }
+
+    pub fn virt(&self) -> &str {
+        &self.virt.0
+    }
+
     pub fn config(&self) -> &Config {
         &self.config
     }
 
     pub fn dslist(&self) -> &DatasourceList {
         &self.dslist
+    }
+
+    pub fn kernel_cmdline(&self) -> &str {
+        &self.kernel_cmdline
+    }
+
+    pub fn smbios(&self) -> &SMBIOS {
+        &self.smbios
     }
 
     pub fn to_old_str(&self) -> String {
@@ -143,30 +159,6 @@ impl Info {
         } else {
             return format!("{UNAVAILABLE}:no-cmdline");
         };
-    }
-
-    pub fn write_result(&self, input: &str) {
-        let runcfg = &self.paths.run_ci_cfg;
-        let error_fn = || {
-            error(format!("failed to write to {:?}", runcfg));
-            panic!("failed to write to {:?}", runcfg);
-        };
-
-        let file = fs::File::open(&self.paths.run_ci_cfg);
-        let mut ostream = match file {
-            Err(_) => error_fn(),
-            Ok(file) => BufWriter::new(file),
-
-        };
-        
-            let pre = match self.config.mode() {
-                Mode::Report => "  ",
-                _ => "",
-            };
-        for line in input.lines() {
-            writeln!(ostream, "{}{}", pre, line).unwrap();
-        }
-
     }
 }
 
@@ -318,7 +310,7 @@ impl Display for Mode {
 }
 
 #[derive(Debug, Default)]
-enum Found {
+pub enum Found {
     /// use the first found do no further checking
     First,
     /// enable all DS_FOUND
@@ -336,7 +328,7 @@ impl Found {
 }
 
 #[derive(Debug, Default)]
-enum Maybe {
+pub enum Maybe {
     /// enable all DS_MAYBE
     #[default]
     All,
@@ -354,7 +346,7 @@ impl Maybe {
 }
 
 #[derive(Debug, Default)]
-enum NotFound {
+pub enum NotFound {
     /// disable cloud-init
     #[default]
     Disabled,
@@ -363,7 +355,7 @@ enum NotFound {
 }
 
 impl NotFound {
-    fn cli_repr(&self) -> String {
+    pub fn cli_repr(&self) -> String {
         match self {
             Self::Disabled => "disable".to_owned(),
             Self::Enabled => "enable".to_owned(),
@@ -472,10 +464,10 @@ impl Policy {
 
 pub struct Config {
     dsname: Option<String>,
-    mode: Mode,
-    on_found: Found,
-    on_maybe: Maybe,
-    on_notfound: NotFound,
+    pub mode: Mode,
+    pub on_found: Found,
+    pub on_maybe: Maybe,
+    pub on_notfound: NotFound,
 }
 
 impl Config {
@@ -586,6 +578,10 @@ fn check_config<'a, P: AsRef<Path>>(key: &str, paths: &'a [P]) -> Option<(String
 pub struct DatasourceList(Vec<Datasource>);
 
 impl DatasourceList {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
     fn read(paths: &Paths) -> Self {
         let mut dslist = None;
 
@@ -617,6 +613,14 @@ impl DatasourceList {
         DatasourceList::default()
     }
 
+    pub fn push(&mut self, ds: Datasource) {
+        self.0.push(ds);
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     /// determines if there is only a single non-none ds entry or not
     pub fn only_one_not_none(&self) -> bool {
         if self.0.len() == 1 {
@@ -629,11 +633,19 @@ impl DatasourceList {
     }
 
     pub fn to_old_str(&self) -> String {
-        self.0.iter().map(|x| String::from(x)).collect::<Vec<_>>().join(" ")
+        self.0
+            .iter()
+            .map(|x| String::from(x))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     pub fn as_old_list(&self) -> Vec<String> {
         self.0.iter().map(|ds| ds.into()).collect::<Vec<_>>()
+    }
+
+    pub fn keep_first(&mut self) {
+        self.0.truncate(1);
     }
 }
 
@@ -646,6 +658,27 @@ impl Default for DatasourceList {
 impl From<&str> for DatasourceList {
     fn from(value: &str) -> Self {
         Self(value.split_whitespace().map(|s| s.into()).collect())
+    }
+}
+
+impl<'a> IntoIterator for &'a DatasourceList {
+    type Item = &'a Datasource;
+    type IntoIter = std::slice::Iter<'a, Datasource>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl FromIterator<Datasource> for DatasourceList {
+    fn from_iter<T: IntoIterator<Item = Datasource>>(iter: T) -> Self {
+        let mut c = DatasourceList::new();
+
+        for i in iter {
+            c.push(i);
+        }
+
+        c
     }
 }
 
