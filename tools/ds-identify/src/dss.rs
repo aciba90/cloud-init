@@ -54,7 +54,7 @@ fn dscheck_none(_info: &Info) -> DscheckResult {
 }
 
 fn dscheck_no_cloud(info: &Info) -> DscheckResult {
-    let fs_label = "cidata CIDATA";
+    let _fs_label = "cidata CIDATA";
     const DS_NOCLOUD: &str = "ds=nocloud";
 
     if info.kernel_cmdline().contains(DS_NOCLOUD) {
@@ -97,10 +97,12 @@ fn dscheck_lxd(info: &Info) -> DscheckResult {
     DscheckResult::NotFound
 }
 
+#[allow(dead_code)]
 fn dscheck_cloud_stack(_info: &Info) -> DscheckResult {
     todo!();
 }
 
+#[allow(dead_code)]
 mod util {
     use crate::paths::Paths;
 

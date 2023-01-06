@@ -91,7 +91,7 @@ fn get_dmi_field(sys_class_dmi_id: &Path, key: Keys) -> Option<String> {
 
 fn dmi_decode(sys_field: &Keys) -> Option<String> {
     match &sys_field {
-        Keys::BoardName => return None,
+        Keys::BoardName => None,
         _ => {
             let key = sys_field.get_dmi_field();
             match Command::new("dmidecode")

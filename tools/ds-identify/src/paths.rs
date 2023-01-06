@@ -25,6 +25,8 @@ pub struct Paths {
 }
 
 impl Paths {
+
+    #[cfg(test)]
     fn with_root(root: &Path) -> Self {
         let run = Self::compose_paths(root, PATH_RUN);
         let run_ci = Self::compose_paths(&run, PATH_RUN_CI);
@@ -68,18 +70,18 @@ impl Paths {
     {
         match (env::var(name), root) {
             (Ok(path), _) => PathBuf::from(&path),
-            (_, Some(root)) => Self::compose_paths(&root, default.as_ref()),
+            (_, Some(root)) => Self::compose_paths(root, default.as_ref()),
             (_, None) => PathBuf::from(default.as_ref()),
         }
     }
     pub fn from_env() -> Self {
         let root = env::var("PATH_ROOT").unwrap_or_else(|_| String::from("/"));
         let root = Path::new(&root);
-        let run = Self::path_from_env("PATH_RUN", Some(&root), &PATH_RUN);
-        let etc_cloud = Self::path_from_env("PATH_ETC_CLOUD", Some(&root), &PATH_ETC_CLOUD);
-        let run_ci = Self::path_from_env("PATH_RUN_CI", Some(&run), &PATH_RUN_CI);
+        let run = Self::path_from_env("PATH_RUN", Some(root), PATH_RUN);
+        let etc_cloud = Self::path_from_env("PATH_ETC_CLOUD", Some(root), PATH_ETC_CLOUD);
+        let run_ci = Self::path_from_env("PATH_RUN_CI", Some(&run), PATH_RUN_CI);
 
-        let default_paths = Paths::from_roots(&root, &run, &run_ci, &etc_cloud);
+        let default_paths = Paths::from_roots(root, &run, &run_ci, &etc_cloud);
 
         let sys_class_dmi_id = Self::path_from_env(
             "PATH_SYS_CLASS_DMI_ID",
@@ -137,7 +139,7 @@ impl Paths {
                 if !entry.ends_with(".cfg") {
                     continue;
                 }
-                cfg_paths.push(entry.into());
+                cfg_paths.push(entry);
             }
         }
 

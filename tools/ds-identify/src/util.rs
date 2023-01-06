@@ -45,13 +45,13 @@ pub fn unquote(val: &str) -> &str {
 ///   ['1'] or [1]
 ///   '1', '2'
 pub fn parse_yaml_array(val: &str) -> Vec<&str> {
-    let val = val.strip_prefix('[').unwrap_or_else(|| val);
-    let val = val.strip_prefix(']').unwrap_or_else(|| val);
+    let val = val.strip_prefix('[').unwrap_or(val);
+    let val = val.strip_prefix(']').unwrap_or(val);
     val.split(',').map(|tok| unquote(tok.trim())).collect()
 }
 
 pub fn get_env_var<K: AsRef<OsStr>>(key: K, default: String) -> String {
-    env::var(key).unwrap_or_else(|_| default)
+    env::var(key).unwrap_or(default)
 }
 
 pub struct Logger {
@@ -70,11 +70,11 @@ impl Logger {
         match log_file {
             "stderr" => (),
             _ => {
-                if log_file.contains("/") {
+                if log_file.contains('/') {
                     // Create parent directories
                     // TODO: unit test
                     if let Some(parent_dir) = path::PathBuf::from(log_file).parent() {
-                        if let Err(_) = ::std::fs::create_dir_all(parent_dir) {
+                        if fs::create_dir_all(parent_dir).is_err() {
                             eprintln!("ERROR: cannot write to {}", di_log.as_ref());
                             log_file = "stderr";
                         }
@@ -126,7 +126,7 @@ impl Logger {
     }
 
     pub fn write_always<S: AsRef<str>>(&self, msg: S) {
-        write!(self.writer.borrow_mut(), "{}\n", msg.as_ref()).expect("writable file");
+        writeln!(self.writer.borrow_mut(), "{}", msg.as_ref()).expect("writable file");
     }
 }
 

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::Command;
 use std::{env, fs, path};
@@ -30,11 +30,11 @@ impl<'a> Info<'a> {
         let virt = Virt::from(&uname_info);
         let is_container = virt.is_container();
         let pid1_prod_name = Self::read_pid1_product_name(&paths.proc_1_environ);
-        let kernel_cmdline = Self::read_kernel_cmdline(&paths, is_container);
-        let config = Config::read(&paths, &kernel_cmdline, &uname_info);
-        let dslist = DatasourceList::read(&logger, &paths);
-        let smbios = SMBIOS::from_kernel_name(uname_info.kernel_name.as_str(), &paths);
-        let fs_info = FSInfo::read_linux(&logger, &is_container);
+        let kernel_cmdline = Self::read_kernel_cmdline(paths, is_container);
+        let config = Config::read(paths, &kernel_cmdline, &uname_info);
+        let dslist = DatasourceList::read(logger, paths);
+        let smbios = SMBIOS::from_kernel_name(uname_info.kernel_name.as_str(), paths);
+        let fs_info = FSInfo::read_linux(logger, &is_container);
 
         Self {
             paths: paths.clone(),
@@ -156,15 +156,15 @@ impl<'a> Info<'a> {
         if is_container {
             let cmdline = fs::read_to_string(&paths.proc_1_cmdline).unwrap();
             let cmdline = cmdline.replace('\0', " ");
-            if cmdline.len() > 0 {
+            if cmdline.is_empty() {
                 return cmdline;
             }
-            return format!("{UNAVAILABLE}:container");
+            format!("{UNAVAILABLE}:container")
         } else if paths.proc_cmdline.is_file() {
-            return fs::read_to_string(&paths.proc_cmdline).unwrap();
+            fs::read_to_string(&paths.proc_cmdline).unwrap()
         } else {
-            return format!("{UNAVAILABLE}:no-cmdline");
-        };
+            format!("{UNAVAILABLE}:no-cmdline")
+        }
     }
 }
 
@@ -176,7 +176,7 @@ pub struct UnameInfo {
     kernel_version: String,
     machine: String,
     operating_system: String,
-    cmd_out: String,
+    _cmd_out: String,
 }
 
 impl UnameInfo {
@@ -214,7 +214,7 @@ impl UnameInfo {
             kernel_version,
             machine,
             operating_system,
-            cmd_out: out,
+            _cmd_out: out,
         }
     }
 }
@@ -233,10 +233,8 @@ impl Virt {
                     virt = String::from_utf8(output.stdout).unwrap();
                     let n_to_remove = virt.trim_end().len();
                     virt.truncate(n_to_remove);
-                } else {
-                    if output.stdout == b"none" || output.stderr == b"none" {
+                } else if output.stdout == b"none" || output.stderr == b"none" {
                         virt = String::from("none");
-                    }
                 }
             }
         } else if uname_info.kernel_name == "FreeBSD" {
@@ -286,11 +284,9 @@ impl Virt {
     }
 
     fn is_container(&self) -> bool {
-        match &self.0.to_lowercase()[..] {
+        matches!(&self.0.to_lowercase()[..], 
             "container-other" | "lxc" | "lxc-libvirt" | "systemd-nspawn" | "docker" | "rkt"
-            | "jail" => true,
-            _ => false,
-        }
+            | "jail")
     }
 }
 
@@ -379,7 +375,7 @@ struct Policy {
     on_found: Found,
     on_maybe: Maybe,
     on_notfound: NotFound,
-    report: bool,
+    _report: bool,
 }
 
 impl Default for Policy {
@@ -389,7 +385,7 @@ impl Default for Policy {
             on_found: Found::default(),
             on_maybe: Maybe::default(),
             on_notfound: NotFound::default(),
-            report: false,
+            _report: false,
         }
     }
 }
@@ -407,6 +403,7 @@ impl Policy {
 
     // XXX: impl From trait
     fn parse_from_uname(uname: &UnameInfo) -> Self {
+        #[allow(clippy::wildcard_in_or_patterns)]
         match &uname.machine[..] {
             // these have dmi data
             "i686" | "i386" | "x86_64" => Policy::default(),
@@ -416,13 +413,13 @@ impl Policy {
     }
 
     fn parse_from_str(policy_str: &str, uname: &UnameInfo) -> Self {
-        let mut policy = Policy::parse_from_uname(&uname);
+        let mut policy = Policy::parse_from_uname(uname);
 
         let mut mode = None;
         let mut found = None;
         let mut maybe = None;
         let mut notfound = None;
-        for tok in policy_str.trim().split(",") {
+        for tok in policy_str.trim().split(',') {
             match tok.split_once('=') {
                 Some(("found", val)) => match val {
                     "all" => found = Some(Found::All),
@@ -630,6 +627,10 @@ impl DatasourceList {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// determines if there is only a single non-none ds entry or not
     pub fn only_one_not_none(&self) -> bool {
         if self.0.len() == 1 {
@@ -644,7 +645,7 @@ impl DatasourceList {
     pub fn to_old_str(&self) -> String {
         self.0
             .iter()
-            .map(|x| String::from(x))
+            .map(String::from)
             .collect::<Vec<_>>()
             .join(" ")
     }
@@ -695,7 +696,7 @@ impl FromIterator<Datasource> for DatasourceList {
 pub struct FSInfo {
     fs_labels: String,
     iso9660_devs: String,
-    fs_uuids: Option<String>,
+    _fs_uuids: Option<String>,
 }
 
 impl FSInfo {
@@ -709,19 +710,19 @@ impl FSInfo {
             // not provide useful information.
             return Self {
                 fs_labels: unavailable_container.clone(),
-                iso9660_devs: unavailable_container.clone(),
-                fs_uuids: None,
+                iso9660_devs: unavailable_container,
+                _fs_uuids: None,
             };
         };
 
-        let blkid_export_out = Self::blkid_export(&logger);
+        let blkid_export_out = Self::blkid_export(logger);
         match blkid_export_out {
             None => {
                 let unavailable_error = format!("{}:error", UNAVAILABLE);
                 Self {
                     fs_labels: unavailable_error.clone(),
                     iso9660_devs: unavailable_error.clone(),
-                    fs_uuids: Some(unavailable_error.clone()),
+                    _fs_uuids: Some(unavailable_error),
                 }
             }
             Some(blkid_export_out) => {
@@ -772,7 +773,7 @@ impl FSInfo {
 
                 Self {
                     fs_labels: labels,
-                    fs_uuids: Some(uuids),
+                    _fs_uuids: Some(uuids),
                     iso9660_devs: isodevs,
                 }
             }

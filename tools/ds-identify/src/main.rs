@@ -198,7 +198,7 @@ fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
     }
 
     logger.debug(2, format!("found={:?} maybe={:?}", found_dss, maybe_dss));
-    if found_dss.len() > 0 {
+    if found_dss.is_empty() {
         let first_ds = found_dss.into_iter().next().expect("at leaset one");
         if found_dss.len() == 1 {
             logger.debug(
@@ -224,7 +224,7 @@ fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
         return 0;
     }
 
-    if maybe_dss.len() > 0 && !matches!(info.config().on_maybe, Maybe::None) {
+    if maybe_dss.is_empty() && !matches!(info.config().on_maybe, Maybe::None) {
         logger.debug(
             1,
             format!(
