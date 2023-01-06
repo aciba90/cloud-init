@@ -1,12 +1,11 @@
-use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use ds_identify::constants::UNAVAILABLE;
 use ds_identify::dss::{Datasource, DscheckResult};
 use ds_identify::info::{DatasourceList, Found, Info, Maybe, Mode, NotFound};
 use ds_identify::paths::Paths;
-use ds_identify::util::{debug, error, get_env_var, warn};
-use std::process::{self, ExitCode};
+use ds_identify::util::{get_env_var, Logger};
+use std::process::ExitCode;
 use std::{env, fs, path::Path};
 
 fn read_uptime<P: AsRef<Path>>(path: P) -> String {
@@ -29,10 +28,10 @@ fn is_manual_clean_and_exiting(var_lib_cloud: &Path) -> bool {
     var_lib_cloud.join("instance/manual-clean").is_file()
 }
 
-fn write_result(content: &str, paths: &Paths, mode: &Mode) {
+fn write_result(logger: &Logger, content: &str, paths: &Paths, mode: &Mode) {
     let runcfg = &paths.run_ci_cfg;
     let error_fn = || {
-        error(format!("failed to write to {:?}", runcfg));
+        logger.error(format!("failed to write to {:?}", runcfg));
         panic!("failed to write to {:?}", runcfg);
     };
 
@@ -69,9 +68,9 @@ fn found<S: AsRef<str>>(
         .join(", ");
     // TODO: Add ds None as fallback
     let result = format!("datasource_list: [{}]", list);
-    write_result(&result, &info.paths(), mode);
+    write_result(&info.logger(), &result, &info.paths(), mode);
     if let Some(extra_lines) = extra_lines {
-        write_result(&extra_lines, &info.paths(), mode);
+        write_result(&info.logger(), &extra_lines, &info.paths(), mode);
     }
 }
 
@@ -97,7 +96,8 @@ fn record_notfound(info: &Info) {
 
 fn print_info() {
     let paths = Paths::from_env();
-    let info = Info::collect_info(&paths);
+    let logger = Logger::new(&paths.log());
+    let info = Info::collect_info(&logger, &paths);
     println!("{}", info.to_old_str());
 }
 
@@ -109,8 +109,9 @@ fn _main() -> ExitCode {
 
     let paths = Paths::from_env();
     let di_log = paths.log();
+    let logger = Logger::new(&di_log);
 
-    debug(
+    logger.debug(
         1,
         format!(
             "[up {}s] ds-identify {args_str}",
@@ -118,9 +119,9 @@ fn _main() -> ExitCode {
         ),
     );
 
-    let info = Info::collect_info(&paths);
+    let info = Info::collect_info(&logger, &paths);
 
-    if di_log.to_str().unwrap() == "stderr" {
+    if di_log == "stderr" {
         todo!();
     } else {
         let old_cli_str = info.to_old_str();
@@ -133,14 +134,14 @@ fn _main() -> ExitCode {
 
     match info.config().mode() {
         Mode::Disabled => {
-            debug(
+            logger.debug(
                 1,
                 format!("mode={}. returning {}", Mode::Disabled, RET_DISABLED),
             );
             return ExitCode::from(RET_DISABLED);
         }
         Mode::Enabled => {
-            debug(
+            logger.debug(
                 1,
                 format!("mode={}. returning {}", Mode::Enabled, RET_ENABLED),
             );
@@ -150,23 +151,28 @@ fn _main() -> ExitCode {
     }
 
     if let Some(dsname) = info.config().dsname() {
-        debug(1, format!("datasource '{dsname}' specified."));
+        logger.debug(1, format!("datasource '{dsname}' specified."));
         found(&info, None, &[dsname], None);
         return ExitCode::SUCCESS;
     }
 
     if is_manual_clean_and_exiting(&paths.var_lib_cloud) {
-        debug(
+        logger.debug(
             1,
             "manual_cache_clean enabled. Not writing datasource_list.",
         );
-        write_result("# manual_cache_clean.", &paths, info.config().mode());
+        write_result(
+            &logger,
+            "# manual_cache_clean.",
+            &paths,
+            info.config().mode(),
+        );
         return ExitCode::SUCCESS;
     }
 
     // if there is only a single entry in $DI_DSLIST
     if info.dslist().only_one_not_none() {
-        debug(
+        logger.debug(
             1,
             format!(
                 "single entry in datasource_list ({}) use that.",
@@ -185,44 +191,44 @@ fn _main() -> ExitCode {
     let mut exmaybe = String::new();
     for ds in info.dslist() {
         let ds_as_str = String::from(ds);
-        debug(2, format!("Checking for datasource '{}'", ds_as_str));
+        logger.debug(2, format!("Checking for datasource '{}'", ds_as_str));
         if let Datasource::Unknown(ds) = ds {
-            warn(format!("No check method for datasource '{}'", ds));
+            logger.warn(format!("No check method for datasource '{}'", ds));
             continue;
         }
 
         match ds.dscheck_fn()(&info) {
             DscheckResult::Found(extra_config) => {
-                debug(1, format!("check for '{}' returned found", ds_as_str));
+                logger.debug(1, format!("check for '{}' returned found", ds_as_str));
                 found_dss.push(ds.clone());
                 if let Some(extra_config) = extra_config {
                     exfound.push_str(&extra_config);
                 }
             }
             DscheckResult::Maybe(extra_config) => {
-                debug(1, format!("check for '{}' returned maybe", ds_as_str));
+                logger.debug(1, format!("check for '{}' returned maybe", ds_as_str));
                 maybe_dss.push(ds.clone());
                 if let Some(extra_config) = extra_config {
                     exmaybe.push_str(&extra_config);
                 }
             }
             DscheckResult::NotFound => {
-                debug(2, format!("check for '{}' returned not-found", ds_as_str));
+                logger.debug(2, format!("check for '{}' returned not-found", ds_as_str));
             }
         }
     }
 
-    debug(2, format!("found={:?} maybe={:?}", found_dss, maybe_dss));
+    logger.debug(2, format!("found={:?} maybe={:?}", found_dss, maybe_dss));
     if found_dss.len() > 0 {
         let first_ds = found_dss.into_iter().nth(0).expect("at leaset one");
         if found_dss.len() == 1 {
-            debug(
+            logger.debug(
                 1,
                 format!("Found single datasource: {}", String::from(first_ds)),
             );
         } else {
             // found=all
-            debug(
+            logger.debug(
                 1,
                 format!(
                     "Found {} datasources found={:?}: {:?}",
@@ -240,7 +246,7 @@ fn _main() -> ExitCode {
     }
 
     if maybe_dss.len() > 0 && !matches!(info.config().on_maybe, Maybe::None) {
-        debug(
+        logger.debug(
             1,
             format!(
                 "{} datasources returned maybe: {:?}",
@@ -279,11 +285,11 @@ fn _main() -> ExitCode {
             (msg, RET_ENABLED)
         }
         _ => {
-            error("Unexpected result");
+            logger.error("Unexpected result");
             (String::from(""), 3)
         }
     };
-    debug(1, msg);
+    logger.debug(1, msg);
     ExitCode::from(ret_code)
 }
 
@@ -296,7 +302,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         _ => {
-            error("unexpected value for DI_MAIN");
+            eprintln!("unexpected value for DI_MAIN");
             ExitCode::FAILURE
         }
     }

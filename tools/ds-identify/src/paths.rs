@@ -123,8 +123,9 @@ impl Paths {
     }
 
     // XXX: move to attr
-    pub fn log(&self) -> PathBuf {
-        self.run_ci.join("ds-identify.log")
+    pub fn log(&self) -> String {
+        // XXX the envvar could be stderr
+        String::from(self.run_ci.join("ds-identify.log").to_str().unwrap())
     }
 
     pub fn etc_ci_cfg_paths(&self) -> Vec<PathBuf> {

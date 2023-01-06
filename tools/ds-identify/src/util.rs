@@ -1,7 +1,11 @@
+use std::io::Write;
 use std::{
+    cell::RefCell,
     env,
     ffi::OsStr,
-    sync::atomic::{AtomicBool, Ordering},
+    fs,
+    io::{self, BufWriter},
+    path,
 };
 
 /// Remove quotes from quoted value.
@@ -39,35 +43,73 @@ pub fn get_env_var<K: AsRef<OsStr>>(key: K, default: String) -> String {
     env::var(key).unwrap_or_else(|_| default)
 }
 
-pub fn error<S: AsRef<str>>(msg: S) {
-    let msg = format!("Error: {}", msg.as_ref());
-    debug(0, &msg);
-    eprintln!("{}", &msg);
+pub struct Logger {
+    level: i32,
+    writer: RefCell<BufWriter<Box<dyn io::Write>>>,
 }
 
-pub fn warn<S: AsRef<str>>(msg: S) {
-    let msg = format!("WARN: {}", msg.as_ref());
-    debug(0, &msg);
-    eprintln!("{}", &msg);
-}
+impl Logger {
+    pub fn new<S: AsRef<str>>(di_log: S) -> Self {
+        let level: i32 = get_env_var("DEBUG_LEVEL", String::from("-1"))
+            .parse()
+            .unwrap();
 
-// TODO: as macro
-pub fn debug<S: AsRef<str>>(level: i32, msg: S) {
-    // TODO: Find a way to not recompute this value in every call
-    let debug_level: i32 = get_env_var("DEBUG_LEVEL", String::from("-1"))
-        .parse()
-        .unwrap();
-    if level >= debug_level {
-        // XXX: enable
-        // return;
+        let mut log_file = di_log.as_ref().trim();
+
+        match log_file {
+            "stderr" => (),
+            _ => {
+                if log_file.contains("/") {
+                    // Create parent directories
+                    // TODO: unit test
+                    if let Some(parent_dir) = path::PathBuf::from(log_file).parent() {
+                        if let Err(_) = ::std::fs::create_dir_all(parent_dir) {
+                            eprintln!("ERROR: cannot write to {}", di_log.as_ref());
+                            log_file = "stderr";
+                        }
+                    }
+                }
+            }
+        }
+
+        let writer: BufWriter<Box<dyn io::Write>> = match log_file {
+            "stderr" => {
+                dbg!("log to stderr");
+                BufWriter::new(Box::new(io::stderr().lock()))
+            }
+            _ => {
+                dbg!("log to file: {}", log_file);
+                // TODO: append mode
+                let file = fs::File::create(log_file).unwrap();
+                BufWriter::new(Box::new(file))
+            }
+        };
+        let writer = RefCell::new(writer);
+
+        Self { level, writer }
     }
-    static _DI_LOGGED: AtomicBool = AtomicBool::new(false);
-    if !_DI_LOGGED.load(Ordering::Relaxed) {
-        // first time here, open file descriptor for append
-        // TODO: log to file
-        _DI_LOGGED.store(true, Ordering::Release);
+
+    fn log<S: AsRef<str>>(&self, level: i32, msg: S) {
+        if level < self.level {
+            return;
+        }
+        write!(self.writer.borrow_mut(), "{}\n", msg.as_ref()).expect("writable file");
     }
-    eprintln!("{}", msg.as_ref());
+
+    pub fn debug<S: AsRef<str>>(&self, level: i32, msg: S) {
+        self.log(level, msg);
+    }
+
+    pub fn warn<S: AsRef<str>>(&self, msg: S) {
+        let msg = format!("WARN: {}", msg.as_ref());
+        self.debug(0, &msg);
+        eprintln!("{}", &msg);
+    }
+    pub fn error<S: AsRef<str>>(&self, msg: S) {
+        let msg = format!("ERROR: {}", msg.as_ref());
+        self.debug(0, &msg);
+        eprintln!("{}", &msg);
+    }
 }
 
 #[cfg(test)]

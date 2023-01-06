@@ -9,9 +9,9 @@ use crate::constants::{DI_DISABLED, DI_DSLIST_DEFAULT, DI_ENABLED, UNAVAILABLE};
 use crate::dss::Datasource;
 use crate::paths::Paths;
 use crate::smbios::SMBIOS;
-use crate::util::{debug, error, parse_yaml_array, unquote};
+use crate::util::{parse_yaml_array, unquote, Logger};
 
-pub struct Info {
+pub struct Info<'a> {
     paths: Paths,
     uname_info: UnameInfo,
     virt: Virt,
@@ -21,19 +21,20 @@ pub struct Info {
     dslist: DatasourceList,
     smbios: SMBIOS,
     fs_info: FSInfo,
+    logger: &'a Logger,
 }
 
-impl Info {
-    pub fn collect_info(paths: &Paths) -> Self {
+impl<'a> Info<'a> {
+    pub fn collect_info(logger: &'a Logger, paths: &Paths) -> Self {
         let uname_info = UnameInfo::read();
         let virt = Virt::from(&uname_info);
         let is_container = virt.is_container();
         let pid1_prod_name = Self::read_pid1_product_name(&paths.proc_1_environ);
         let kernel_cmdline = Self::read_kernel_cmdline(&paths, is_container);
         let config = Config::read(&paths, &kernel_cmdline, &uname_info);
-        let dslist = DatasourceList::read(&paths);
+        let dslist = DatasourceList::read(&logger, &paths);
         let smbios = SMBIOS::from_kernel_name(uname_info.kernel_name.as_str(), &paths);
-        let fs_info = FSInfo::read_linux(&is_container);
+        let fs_info = FSInfo::read_linux(&logger, &is_container);
 
         Self {
             paths: paths.clone(),
@@ -45,6 +46,7 @@ impl Info {
             dslist,
             smbios,
             fs_info,
+            logger,
         }
     }
 
@@ -70,6 +72,10 @@ impl Info {
 
     pub fn smbios(&self) -> &SMBIOS {
         &self.smbios
+    }
+
+    pub fn logger(&self) -> &Logger {
+        self.logger
     }
 
     pub fn to_old_str(&self) -> String {
@@ -582,7 +588,7 @@ impl DatasourceList {
         Self(Vec::new())
     }
 
-    fn read(paths: &Paths) -> Self {
+    fn read(logger: &Logger, paths: &Paths) -> Self {
         let mut dslist = None;
 
         if let Ok(dsname) = env::var("DI_DSNAME") {
@@ -601,7 +607,7 @@ impl DatasourceList {
 
         let cfg_paths = paths.etc_ci_cfg_paths();
         if let Some((found_dslist, path)) = check_config("datasource_list", &cfg_paths[..]) {
-            debug(
+            logger.debug(
                 1,
                 format!("{:?} set datasource_list: {}", path, found_dslist),
             );
@@ -690,7 +696,7 @@ pub struct FSInfo {
 }
 
 impl FSInfo {
-    pub fn read_linux(is_container: &bool) -> Self {
+    pub fn read_linux(logger: &Logger, is_container: &bool) -> Self {
         // do not rely on links in /dev/disk which might not be present yet.
         // Note that blkid < 2.22 (centos6, trusty) do not output DEVNAME.
         // that means that DI_ISO9660_DEVS will not be set.
@@ -705,7 +711,7 @@ impl FSInfo {
             };
         };
 
-        let blkid_export_out = Self::blkid_export();
+        let blkid_export_out = Self::blkid_export(&logger);
         match blkid_export_out {
             None => {
                 let unavailable_error = format!("{}:error", UNAVAILABLE);
@@ -770,7 +776,7 @@ impl FSInfo {
         }
     }
 
-    fn blkid_export() -> Option<String> {
+    fn blkid_export(logger: &Logger) -> Option<String> {
         let output = Command::new("blkid")
             .args(["-c /dev/null -o export"])
             .output()
@@ -780,7 +786,7 @@ impl FSInfo {
                 .status
                 .code()
                 .map_or("?".to_string(), |c| c.to_string());
-            error(&format!(
+            logger.error(&format!(
                 "failed running [{}]: blokid -c /dev/null -o export",
                 ret
             ));

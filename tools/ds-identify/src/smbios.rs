@@ -1,3 +1,4 @@
+use std::io;
 use std::{fs, path::Path, process::Command};
 
 use crate::paths::Paths;
@@ -68,7 +69,18 @@ fn get_dmi_field(sys_class_dmi_id: &Path, key: Keys) -> Option<String> {
     let path = sys_class_dmi_id.join(key.get_dmi_file());
     if sys_class_dmi_id.is_dir() {
         if path.is_file() {
-            return Some(fs::read_to_string(path).unwrap());
+            dbg!(&path);
+            match fs::read_to_string(&path) {
+                Err(e) => match e.kind() {
+                    io::ErrorKind::PermissionDenied => {
+                        return None;
+                    }
+                    _ => panic!("Error reading {}: {}", &path.display(), e),
+                },
+                Ok(content) => {
+                    return Some(content);
+                }
+            }
         }
         // if `/sys/class/dmi/id` exists, but not the object we're looking for,
         // do *not* fallback to dmidecode!
