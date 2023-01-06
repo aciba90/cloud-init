@@ -224,12 +224,15 @@ pub struct Virt(String);
 
 impl Virt {
     fn from(uname_info: &UnameInfo) -> Self {
+        dbg!(&uname_info);
         let mut virt = String::from(UNAVAILABLE);
         if is_systemd() {
             let output = Command::new("systemd-detect-virt").output();
             if let Ok(output) = output {
                 if output.status.success() {
                     virt = String::from_utf8(output.stdout).unwrap();
+                    let n_to_remove = virt.trim_end().len();
+                    virt.truncate(n_to_remove);
                 } else {
                     if output.stdout == b"none" || output.stderr == b"none" {
                         virt = String::from("none");

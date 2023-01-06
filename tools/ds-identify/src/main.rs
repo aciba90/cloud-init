@@ -49,7 +49,7 @@ fn write_result(logger: &Logger, content: &str, paths: &Paths, mode: &Mode) {
         _ => "",
     };
     for line in content.lines() {
-        if line.len() == 0 {
+        if line.is_empty() {
             continue;
         }
         writeln!(ostream, "{}{}", pre, line).unwrap();
@@ -71,9 +71,9 @@ fn found<S: AsRef<str>>(
         .join(", ");
     // TODO: Add ds None as fallback
     let result = format!("datasource_list: [{}]", list);
-    write_result(&info.logger(), &result, &info.paths(), mode);
+    write_result(info.logger(), &result, info.paths(), mode);
     if let Some(extra_lines) = extra_lines {
-        write_result(&info.logger(), &extra_lines, &info.paths(), mode);
+        write_result(info.logger(), extra_lines, info.paths(), mode);
     }
 }
 
@@ -84,14 +84,14 @@ fn found<S: AsRef<str>>(
 fn record_notfound(info: &Info) {
     match info.config().mode() {
         Mode::Report => {
-            found::<&str>(&info, None, &[], None);
+            found::<&str>(info, None, &[], None);
         }
         Mode::Search => {
             let msg = format!(
                 "# reporting not found result. notfound={}.",
                 info.config().on_notfound.cli_repr()
             );
-            found::<&str>(&info, Some(&Mode::Report), &[], Some(&msg));
+            found::<&str>(info, Some(&Mode::Report), &[], Some(&msg));
         }
         _ => (),
     }
@@ -105,14 +105,8 @@ fn print_info() {
 }
 
 fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
-    let di_log = info.paths().log();
-    if di_log == "stderr" {
-        todo!();
-    } else {
-        let old_cli_str = info.to_old_str();
-        // TODO: print to `DI_LOG`;
-        println!("{}", old_cli_str);
-    }
+    let old_cli_str = info.to_old_str();
+    logger.write_always(old_cli_str);
 
     const RET_DISABLED: u8 = 1;
     const RET_ENABLED: u8 = 0;
@@ -137,7 +131,7 @@ fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
 
     if let Some(dsname) = info.config().dsname() {
         logger.debug(1, format!("datasource '{dsname}' specified."));
-        found(&info, None, &[dsname], None);
+        found(info, None, &[dsname], None);
         return 0;
     }
 
@@ -147,7 +141,7 @@ fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
             "manual_cache_clean enabled. Not writing datasource_list.",
         );
         write_result(
-            &logger,
+            logger,
             "# manual_cache_clean.",
             info.paths(),
             info.config().mode(),
@@ -165,7 +159,7 @@ fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
             ),
         );
         let ds_list = info.dslist().as_old_list();
-        found(&info, None, &ds_list, None);
+        found(info, None, &ds_list, None);
         return 0;
     }
 
@@ -182,7 +176,7 @@ fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
             continue;
         }
 
-        match ds.dscheck_fn()(&info) {
+        match ds.dscheck_fn()(info) {
             DscheckResult::Found(extra_config) => {
                 logger.debug(1, format!("check for '{}' returned found", ds_as_str));
                 found_dss.push(ds.clone());
@@ -205,7 +199,7 @@ fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
 
     logger.debug(2, format!("found={:?} maybe={:?}", found_dss, maybe_dss));
     if found_dss.len() > 0 {
-        let first_ds = found_dss.into_iter().nth(0).expect("at leaset one");
+        let first_ds = found_dss.into_iter().next().expect("at leaset one");
         if found_dss.len() == 1 {
             logger.debug(
                 1,
@@ -226,7 +220,7 @@ fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
                 found_dss.keep_first();
             }
         }
-        found(&info, None, &found_dss.as_old_list(), Some(&exfound));
+        found(info, None, &found_dss.as_old_list(), Some(&exfound));
         return 0;
     }
 
@@ -239,12 +233,12 @@ fn ds_identify_inner(logger: &Logger, info: &Info) -> u8 {
                 maybe_dss
             ),
         );
-        found(&info, None, &maybe_dss.as_old_list(), Some(&exmaybe));
+        found(info, None, &maybe_dss.as_old_list(), Some(&exmaybe));
         return 0;
     }
 
     // record the empty result.
-    record_notfound(&info);
+    record_notfound(info);
 
     let base_msg = format!(
         "No ds found [mode={}, notfound={}].",

@@ -107,7 +107,7 @@ impl Logger {
         if level < self.level {
             return;
         }
-        write!(self.writer.borrow_mut(), "{}\n", msg.as_ref()).expect("writable file");
+        self.write_always(msg);
     }
 
     pub fn debug<S: AsRef<str>>(&self, level: i32, msg: S) {
@@ -123,6 +123,10 @@ impl Logger {
         let msg = format!("ERROR: {}", msg.as_ref());
         self.debug(0, &msg);
         eprintln!("{}", &msg);
+    }
+
+    pub fn write_always<S: AsRef<str>>(&self, msg: S) {
+        write!(self.writer.borrow_mut(), "{}\n", msg.as_ref()).expect("writable file");
     }
 }
 

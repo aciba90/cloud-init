@@ -8,4 +8,6 @@ lxc init ubuntu-daily:lunar $INSTANCE
 lxc file push "$BINARY" $INSTANCE/usr/lib/cloud-init/ds-identify
 
 lxc start $INSTANCE
+sleep 0.5
+lxc exec $INSTANCE -- cloud-init status --wait
 
