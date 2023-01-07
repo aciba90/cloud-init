@@ -1,11 +1,39 @@
 use crate::info::Info;
 use std::{fs, os::unix::fs::FileTypeExt};
 
+pub use list::DatasourceList;
+mod list;
+
 #[derive(Debug, Clone)]
 pub enum Datasource {
-    None,
-    NoCloud,
+    AliYun,
+    AltCloud,
+    Azure,
+    Bigstep,
+    CloudSigma,
+    CloudStack,
+    ConfigDrive,
+    DigitalOcean,
+    Ec2,
+    Exoscale,
+    GCE,
+    Hetzner,
+    IBMCloud,
     LXD,
+    MAAS,
+    NWCS,
+    NoCloud,
+    None,
+    OVF,
+    OpenNebula,
+    OpenStack,
+    Oracle,
+    RbxCloud,
+    Scaleway,
+    SmartOS,
+    UpCloud,
+    VMware,
+    Vultr,
     Unknown(String),
 }
 
@@ -45,6 +73,7 @@ impl From<&Datasource> for String {
             Datasource::None => "None".to_string(),
             Datasource::LXD => "LXD".to_string(),
             Datasource::Unknown(ds) => format!("Unknown({})", ds),
+            _ => todo!(),
         }
     }
 }

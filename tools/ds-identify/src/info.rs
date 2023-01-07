@@ -1,15 +1,21 @@
-use std::fmt::Display;
-use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::Command;
-use std::{env, fs, path};
+use std::{fs, path};
 
-use crate::constants::{DI_DISABLED, DI_DSLIST_DEFAULT, DI_ENABLED, UNAVAILABLE};
-use crate::dss::Datasource;
+use crate::constants::UNAVAILABLE;
 use crate::paths::Paths;
-use crate::smbios::SMBIOS;
-use crate::util::{parse_yaml_array, unquote, Logger};
+use crate::sources::DatasourceList;
+use crate::util::Logger;
+use smbios::SmBios;
+use uname::UnameInfo;
+
+use self::config::Config;
+pub use self::config::{Found, Maybe, Mode, NotFound};
+
+mod config;
+mod smbios;
+mod uname;
 
 pub struct Info<'a> {
     paths: Paths,
@@ -19,7 +25,7 @@ pub struct Info<'a> {
     kernel_cmdline: String,
     config: Config,
     dslist: DatasourceList,
-    smbios: SMBIOS,
+    smbios: SmBios,
     fs_info: FSInfo,
     logger: &'a Logger,
 }
@@ -33,7 +39,7 @@ impl<'a> Info<'a> {
         let kernel_cmdline = Self::read_kernel_cmdline(paths, is_container);
         let config = Config::read(paths, &kernel_cmdline, &uname_info);
         let dslist = DatasourceList::read(logger, paths);
-        let smbios = SMBIOS::from_kernel_name(uname_info.kernel_name.as_str(), paths);
+        let smbios = SmBios::from_kernel_name(uname_info.kernel_name.as_str(), paths);
         let fs_info = FSInfo::read_linux(logger, &is_container);
 
         Self {
@@ -70,7 +76,7 @@ impl<'a> Info<'a> {
         &self.kernel_cmdline
     }
 
-    pub fn smbios(&self) -> &SMBIOS {
+    pub fn smbios(&self) -> &SmBios {
         &self.smbios
     }
 
@@ -121,7 +127,7 @@ impl<'a> Info<'a> {
             "UNAME_OPERATING_SYSTEM={}\n",
             self.uname_info.operating_system
         ));
-        string.push_str(&format!("DSNAME={:?}\n", self.config.dsname));
+        string.push_str(&format!("DSNAME={:?}\n", self.config.dsname()));
         string.push_str(&format!("DSLIST={}\n", self.dslist.to_old_str()));
         string.push_str(&format!("MODE={}\n", self.config.mode));
         string.push_str(&format!("ON_FOUND={:?}\n", self.config.on_found));
@@ -169,57 +175,6 @@ impl<'a> Info<'a> {
 }
 
 #[derive(Debug)]
-pub struct UnameInfo {
-    kernel_name: String,
-    node_name: String,
-    kernel_release: String,
-    kernel_version: String,
-    machine: String,
-    operating_system: String,
-    _cmd_out: String,
-}
-
-impl UnameInfo {
-    pub fn read() -> Self {
-        // run uname, and parse output.
-        // uname is tricky to parse as it outputs always in a given order
-        // independent of option order. kernel-version is known to have spaces.
-        // 1   -s kernel-name
-        // 2   -n nodename
-        // 3   -r kernel-release
-        // 4.. -v kernel-version(whitespace)
-        // N-2 -m machine
-        // N-1 -o operating-system
-        static ERR_MSG: &str = "failed reading uname with 'uname -snrvmo'";
-
-        let output = Command::new("uname")
-            .arg("-snrvmo")
-            .output()
-            .expect(ERR_MSG);
-        let out = String::from_utf8(output.stdout).expect(ERR_MSG);
-
-        let mut out_words = out.split(' ');
-
-        let kernel_name = out_words.next().unwrap().to_string();
-        let node_name = out_words.next().unwrap().to_string();
-        let kernel_release = out_words.next().unwrap().to_string();
-        let operating_system = out_words.next_back().unwrap().to_string();
-        let machine = out_words.next_back().unwrap().to_string();
-        let kernel_version = out_words.collect::<Vec<_>>().join(" ");
-
-        UnameInfo {
-            kernel_name,
-            node_name,
-            kernel_release,
-            kernel_version,
-            machine,
-            operating_system,
-            _cmd_out: out,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct Virt(String);
 
 impl Virt {
@@ -234,7 +189,7 @@ impl Virt {
                     let n_to_remove = virt.trim_end().len();
                     virt.truncate(n_to_remove);
                 } else if output.stdout == b"none" || output.stderr == b"none" {
-                        virt = String::from("none");
+                    virt = String::from("none");
                 }
             }
         } else if uname_info.kernel_name == "FreeBSD" {
@@ -284,412 +239,21 @@ impl Virt {
     }
 
     fn is_container(&self) -> bool {
-        matches!(&self.0.to_lowercase()[..], 
-            "container-other" | "lxc" | "lxc-libvirt" | "systemd-nspawn" | "docker" | "rkt"
-            | "jail")
+        matches!(
+            &self.0.to_lowercase()[..],
+            "container-other"
+                | "lxc"
+                | "lxc-libvirt"
+                | "systemd-nspawn"
+                | "docker"
+                | "rkt"
+                | "jail"
+        )
     }
 }
 
 fn is_systemd() -> bool {
     path::Path::new("/run/systemd").is_dir()
-}
-
-#[derive(Debug)]
-pub enum Mode {
-    Disabled,
-    Enabled,
-    Search,
-    Report,
-}
-
-impl Display for Mode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let cli = match self {
-            Self::Disabled => DI_DISABLED,
-            Self::Enabled => DI_ENABLED,
-            Self::Search => "search",
-            Self::Report => "report",
-        };
-        write!(f, "{cli}")
-    }
-}
-
-#[derive(Debug, Default)]
-pub enum Found {
-    /// use the first found do no further checking
-    First,
-    /// enable all DS_FOUND
-    #[default]
-    All,
-}
-
-impl Found {
-    fn cli_repr(&self) -> String {
-        match self {
-            Self::First => "first".to_owned(),
-            Self::All => "all".to_owned(),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub enum Maybe {
-    /// enable all DS_MAYBE
-    #[default]
-    All,
-    /// ignore any DS_MAYBE
-    None,
-}
-
-impl Maybe {
-    fn cli_repr(&self) -> String {
-        match self {
-            Self::None => "none".to_owned(),
-            Self::All => "all".to_owned(),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub enum NotFound {
-    /// disable cloud-init
-    #[default]
-    Disabled,
-    /// enable cloud-init
-    Enabled,
-}
-
-impl NotFound {
-    pub fn cli_repr(&self) -> String {
-        match self {
-            Self::Disabled => "disable".to_owned(),
-            Self::Enabled => "enable".to_owned(),
-        }
-    }
-}
-
-// TODO: test fixing default modes
-#[derive(Debug)]
-struct Policy {
-    mode: Mode,
-    on_found: Found,
-    on_maybe: Maybe,
-    on_notfound: NotFound,
-    _report: bool,
-}
-
-impl Default for Policy {
-    fn default() -> Self {
-        Self {
-            mode: Mode::Search,
-            on_found: Found::default(),
-            on_maybe: Maybe::default(),
-            on_notfound: NotFound::default(),
-            _report: false,
-        }
-    }
-}
-
-impl Policy {
-    fn default_no_dmi() -> Self {
-        Self {
-            mode: Mode::Search,
-            on_found: Found::All,
-            on_maybe: Maybe::All,
-            on_notfound: NotFound::Enabled,
-            ..Default::default()
-        }
-    }
-
-    // XXX: impl From trait
-    fn parse_from_uname(uname: &UnameInfo) -> Self {
-        #[allow(clippy::wildcard_in_or_patterns)]
-        match &uname.machine[..] {
-            // these have dmi data
-            "i686" | "i386" | "x86_64" => Policy::default(),
-            // aarch64 has dmi, but not currently used (LP: #1663304)
-            "aarch64" | _ => Policy::default_no_dmi(),
-        }
-    }
-
-    fn parse_from_str(policy_str: &str, uname: &UnameInfo) -> Self {
-        let mut policy = Policy::parse_from_uname(uname);
-
-        let mut mode = None;
-        let mut found = None;
-        let mut maybe = None;
-        let mut notfound = None;
-        for tok in policy_str.trim().split(',') {
-            match tok.split_once('=') {
-                Some(("found", val)) => match val {
-                    "all" => found = Some(Found::All),
-                    "first" => found = Some(Found::First),
-                    val => Self::parse_warn("found", val, &policy.on_found.cli_repr()),
-                },
-                Some(("maybe", val)) => match val {
-                    "all" => maybe = Some(Maybe::All),
-                    "none" => maybe = Some(Maybe::None),
-                    val => Self::parse_warn("maybe", val, &policy.on_maybe.cli_repr()),
-                },
-                Some(("notfound", val)) => match val {
-                    DI_DISABLED => notfound = Some(NotFound::Disabled),
-                    DI_ENABLED => notfound = Some(NotFound::Enabled),
-                    val => Self::parse_warn("notfound", val, &policy.on_notfound.cli_repr()),
-                },
-                Some(_) => continue, // backward compat
-                None => match tok {
-                    DI_ENABLED => mode = Some(Mode::Enabled),
-                    DI_DISABLED => mode = Some(Mode::Disabled),
-                    "search" => mode = Some(Mode::Search),
-                    "report" => mode = Some(Mode::Report),
-                    _ => continue, // backward compat
-                },
-            }
-        }
-
-        if let Some(x) = mode {
-            policy.mode = x;
-        };
-        if let Some(x) = found {
-            policy.on_found = x;
-        };
-        if let Some(x) = maybe {
-            policy.on_maybe = x;
-        };
-        if let Some(x) = notfound {
-            policy.on_notfound = x;
-        };
-
-        policy
-    }
-
-    fn parse_warn(key: &str, invalid: &str, valid: &str) {
-        eprintln!("WARN: invalid value '{invalid}' for key '{key}'. Using {key}={valid}");
-    }
-}
-
-pub struct Config {
-    dsname: Option<String>,
-    pub mode: Mode,
-    pub on_found: Found,
-    pub on_maybe: Maybe,
-    pub on_notfound: NotFound,
-}
-
-impl Config {
-    pub fn mode(&self) -> &Mode {
-        &self.mode
-    }
-
-    pub fn dsname(&self) -> Option<&str> {
-        match &self.dsname {
-            None => None,
-            Some(dsname) => Some(dsname),
-        }
-    }
-
-    fn from_file(path: &Path) -> (Option<String>, Option<String>) {
-        // TODO: input with explicit keyname
-        if !path.is_file() {
-            panic!("{path:?} exists but is not a file!");
-            // TODO: exit_code 1
-        }
-        let mut dsname = None;
-        let mut policy = None;
-        for line in fs::read_to_string(path).unwrap().lines() {
-            let (key, val) = match line.split_once(':') {
-                None => continue, // no `:` in the line.
-                Some((key, val)) => {
-                    let key = key.trim();
-                    let val = unquote(val.trim());
-                    (key, val)
-                }
-            };
-            match key {
-                "datasource" => dsname = Some(val.to_string()),
-                "policy" => policy = Some(val.to_string()),
-                _ => (),
-            };
-        }
-
-        (dsname, policy)
-    }
-
-    pub fn read(paths: &Paths, kernel_cmdline: &str, uname: &UnameInfo) -> Self {
-        let mut dsname = None;
-        let mut policy = None;
-        if paths.di_config.exists() {
-            (dsname, policy) = Self::from_file(&paths.di_config);
-        };
-
-        for tok in kernel_cmdline.split(' ') {
-            match tok.split_once('=') {
-                None => continue,
-                Some((key, val)) => match key {
-                    "ci.ds" | "ci.datasource" => dsname = Some(val.to_string()),
-                    "ci.di.policy" => policy = Some(val.to_string()),
-                    _ => continue,
-                },
-            }
-        }
-
-        let policy = match policy {
-            Some(p) => Policy::parse_from_str(&p, uname),
-            None => Policy::parse_from_uname(uname),
-        };
-
-        // TODO: `debug` policy
-        dbg!(&policy);
-
-        Self {
-            dsname,
-            mode: policy.mode,
-            on_found: policy.on_found,
-            on_maybe: policy.on_maybe,
-            on_notfound: policy.on_notfound,
-        }
-    }
-}
-
-/// somewhat hackily read through paths for `key`
-///
-/// currently does not respect any hierarchy in searching for key.
-fn check_config<'a, P: AsRef<Path>>(key: &str, paths: &'a [P]) -> Option<(String, &'a Path)> {
-    let mut value_path = None;
-
-    for f in paths.iter().filter(|p| p.as_ref().is_file()) {
-        let stream = BufReader::new(File::open(f).unwrap());
-        for line in stream.lines() {
-            let line = line.unwrap();
-
-            // remove trailing comments or full line comments
-            let line = match line.split_once('#') {
-                Some((line, _)) => line,
-                None => &line,
-            }
-            .trim();
-
-            if let Some((k, v)) = line.split_once(':') {
-                if key == k.trim() {
-                    value_path = Some((v.trim().to_owned(), f.as_ref()));
-                }
-            };
-        }
-    }
-    value_path
-}
-
-// XXX: refactor Strings -> enums
-#[derive(Debug)]
-pub struct DatasourceList(Vec<Datasource>);
-
-impl DatasourceList {
-    pub fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    fn read(logger: &Logger, paths: &Paths) -> Self {
-        let mut dslist = None;
-
-        if let Ok(dsname) = env::var("DI_DSNAME") {
-            dslist = Some(dsname);
-        };
-
-        // TODO: kernel cmdline
-        // LP: #1582323. cc:{'datasource_list': ['name']}
-        // more generically cc:<yaml>[end_cc]
-
-        // if DI_DSNAME is set as an envvar or DS_LIST is in the kernel cmdline,
-        // then avoid parsing config.
-        if let Some(dslist) = dslist {
-            return Self::from(&dslist[..]);
-        };
-
-        let cfg_paths = paths.etc_ci_cfg_paths();
-        if let Some((found_dslist, path)) = check_config("datasource_list", &cfg_paths[..]) {
-            logger.debug(
-                1,
-                format!("{:?} set datasource_list: {}", path, found_dslist),
-            );
-            let dslist = parse_yaml_array(&found_dslist);
-            let dslist = dslist.iter().map(|x| (*x).into()).collect();
-            return Self(dslist);
-        };
-
-        DatasourceList::default()
-    }
-
-    pub fn push(&mut self, ds: Datasource) {
-        self.0.push(ds);
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// determines if there is only a single non-none ds entry or not
-    pub fn only_one_not_none(&self) -> bool {
-        if self.0.len() == 1 {
-            return true;
-        }
-        if self.0.len() == 2 && matches!(self.0.last().expect("an element"), Datasource::None) {
-            return true;
-        }
-        false
-    }
-
-    pub fn to_old_str(&self) -> String {
-        self.0
-            .iter()
-            .map(String::from)
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    pub fn as_old_list(&self) -> Vec<String> {
-        self.0.iter().map(|ds| ds.into()).collect::<Vec<_>>()
-    }
-
-    pub fn keep_first(&mut self) {
-        self.0.truncate(1);
-    }
-}
-
-impl Default for DatasourceList {
-    fn default() -> Self {
-        Self(DI_DSLIST_DEFAULT.split(' ').map(|s| s.into()).collect())
-    }
-}
-
-impl From<&str> for DatasourceList {
-    fn from(value: &str) -> Self {
-        Self(value.split_whitespace().map(|s| s.into()).collect())
-    }
-}
-
-impl<'a> IntoIterator for &'a DatasourceList {
-    type Item = &'a Datasource;
-    type IntoIter = std::slice::Iter<'a, Datasource>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
-    }
-}
-
-impl FromIterator<Datasource> for DatasourceList {
-    fn from_iter<T: IntoIterator<Item = Datasource>>(iter: T) -> Self {
-        let mut c = DatasourceList::new();
-
-        for i in iter {
-            c.push(i);
-        }
-
-        c
-    }
 }
 
 #[derive(Debug)]

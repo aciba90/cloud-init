@@ -25,7 +25,6 @@ pub struct Paths {
 }
 
 impl Paths {
-
     #[cfg(test)]
     fn with_root(root: &Path) -> Self {
         let run = Self::compose_paths(root, PATH_RUN);

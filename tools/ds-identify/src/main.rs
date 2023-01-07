@@ -1,9 +1,9 @@
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use ds_identify::constants::UNAVAILABLE;
-use ds_identify::dss::{Datasource, DscheckResult};
-use ds_identify::info::{DatasourceList, Found, Info, Maybe, Mode, NotFound};
+use ds_identify::info::{Found, Info, Maybe, Mode, NotFound};
 use ds_identify::paths::Paths;
+use ds_identify::sources::{Datasource, DatasourceList, DscheckResult};
 use ds_identify::util::{ensure_sane_path, get_env_var, Logger};
 use std::process::ExitCode;
 use std::{env, fs, path::Path};

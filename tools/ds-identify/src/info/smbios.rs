@@ -36,7 +36,7 @@ impl Keys {
     }
 }
 
-pub struct SMBIOS {
+pub struct SmBios {
     pub sys_vendor: Option<String>,
     pub board_name: Option<String>,
     pub chassis_asset_tag: Option<String>,
@@ -45,7 +45,7 @@ pub struct SMBIOS {
     pub product_uuid: Option<String>,
 }
 
-impl SMBIOS {
+impl SmBios {
     pub fn from_kernel_name(kernel_name: &str, paths: &Paths) -> Self {
         match kernel_name {
             "FreeBSD" => todo!(),
