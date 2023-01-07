@@ -282,7 +282,6 @@ data_files = [
     (
         USR_LIB_EXEC + "/cloud-init",
         [
-            "tools/ds-identify",
             "tools/hook-hotplug",
             "tools/uncloud-init",
             "tools/write-ssh-key-fingerprints",

@@ -4,7 +4,9 @@
          "debhelper",
          "dh-python",
          "dh-systemd",
-         "python3-debconf"
+         "python3-debconf",
+         "cargo:native",
+         "rustc:native"
       ],
       "renames" : {
          "pyyaml" : "python3-yaml",

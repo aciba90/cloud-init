@@ -111,13 +111,18 @@ impl Display for Mode {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub enum Found {
     /// use the first found do no further checking
     First,
     /// enable all DS_FOUND
-    #[default]
     All,
+}
+
+impl Default for Found {
+    fn default() -> Self {
+        Self::All
+    }
 }
 
 impl Found {
@@ -129,13 +134,18 @@ impl Found {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub enum Maybe {
     /// enable all DS_MAYBE
-    #[default]
     All,
     /// ignore any DS_MAYBE
     None,
+}
+
+impl Default for Maybe {
+    fn default() -> Self {
+        Self::All
+    }
 }
 
 impl Maybe {
@@ -147,13 +157,18 @@ impl Maybe {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub enum NotFound {
     /// disable cloud-init
-    #[default]
     Disabled,
     /// enable cloud-init
     Enabled,
+}
+
+impl Default for NotFound {
+    fn default() -> Self {
+        Self::Disabled
+    }
 }
 
 impl NotFound {
