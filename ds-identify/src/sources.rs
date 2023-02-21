@@ -84,7 +84,7 @@ fn dscheck_none(_info: &Info) -> DscheckResult {
 
 fn dscheck_no_cloud(info: &Info) -> DscheckResult {
     let _fs_label = "cidata CIDATA";
-    const DS_NOCLOUD: &str = "ds=nocloud";
+    static DS_NOCLOUD: &str = "ds=nocloud";
 
     if info.kernel_cmdline().contains(DS_NOCLOUD) {
         return DscheckResult::Found(None);
@@ -96,7 +96,20 @@ fn dscheck_no_cloud(info: &Info) -> DscheckResult {
         }
     }
 
-    // todo!();
+    for d in ["nocloud", "nocloud-net"] {
+        let seed_found = util::check_seed_dir(info.paths(), d, Some(&["meta-data", "user-data"]))
+            || util::check_writable_seed_dir(info.paths(), d, Some(&["meta-data", "user-data"]));
+        if seed_found {
+            return DscheckResult::Found(None);
+        }
+    }
+
+    if info.fs_info().has_fs_with_label(&["cidata", "CIDATA"]) {
+        return DscheckResult::Found(None);
+    }
+
+    // TODO: extract and use sources::list::check_config
+
     DscheckResult::NotFound
 }
 
@@ -151,7 +164,7 @@ mod util {
         true
     }
 
-    pub fn check_writable_seed_dir(paths: &Paths) -> bool {
+    pub fn check_writable_seed_dir(paths: &Paths, _name: &str, _required: Option<&[&str]>) -> bool {
         // ubuntu core bind-mounts /writable/system-data/var/lib/cloud
         // over the top of /var/lib/cloud, but the mount might not be done yet.
         const WDIR: &str = "writable/system-data";
@@ -161,6 +174,7 @@ mod util {
 
         // TODO
 
-        true
+        false
+        // true
     }
 }

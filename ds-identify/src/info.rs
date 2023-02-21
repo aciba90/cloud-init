@@ -80,6 +80,10 @@ impl<'a> Info<'a> {
         &self.smbios
     }
 
+    pub fn fs_info(&self) -> &FSInfo {
+        &self.fs_info
+    }
+
     pub fn logger(&self) -> &Logger {
         self.logger
     }
@@ -362,5 +366,15 @@ impl FSInfo {
         } else {
             Some(String::from_utf8(output.stdout).expect("valid utf8 output"))
         }
+    }
+
+    /// Return true if there is a filesystem that matches any of the labels.
+    pub fn has_fs_with_label(&self, labels: &[&str]) -> bool {
+        for label in labels {
+            if self.fs_labels.contains(&format!(",{},", label)) {
+                return true;
+            }
+        }
+        false
     }
 }
