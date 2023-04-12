@@ -11,7 +11,7 @@ cloud-init (23.1-0ubuntu0~22.04.2) UNRELEASED; urgency=medium
   * Upstream snapshot based on upstream/main at d7bdba6f.
   * Upstream snapshot based on upstream/main at a664b712.
 
- -- Alberto Contreras <alberto.contreras@canonical.com>  Wed, 12 Apr 2023 12:08:28 +0200
+ -- Alberto Contreras <alberto.contreras@canonical.com>  Wed, 12 Apr 2023 12:08:55 +0200
 
 cloud-init (23.1-0ubuntu0~22.04.1) jammy; urgency=medium
 
