@@ -17,10 +17,19 @@ import pytest
 import cloudinit.config
 from cloudinit.features import get_features
 from cloudinit.util import is_true
+from tests.integration_tests.conftest import get_validated_source
 from tests.integration_tests.decorators import retry
-from tests.integration_tests.instances import IntegrationInstance
+from tests.integration_tests.instances import (
+    CloudInitSource,
+    IntegrationInstance,
+)
 from tests.integration_tests.integration_settings import PLATFORM
-from tests.integration_tests.releases import CURRENT_RELEASE, IS_UBUNTU
+from tests.integration_tests.releases import (
+    CURRENT_RELEASE,
+    FOCAL,
+    IS_UBUNTU,
+    JAMMY,
+)
 from tests.integration_tests.util import (
     get_feature_flag_value,
     get_inactive_modules,
@@ -323,7 +332,22 @@ class TestCombined:
             "/run/cloud-init/combined-cloud-config.json"
         )
         data = json.loads(combined_json)
-        assert data["features"] == get_features()
+
+        features = get_features()
+        source = get_validated_source(class_client.cloud)
+        # Override Ubuntu specific features per series
+        if source in (
+            CloudInitSource.NONE,
+            CloudInitSource.PPA,
+            CloudInitSource.PROPOSED,
+            CloudInitSource.UPGRADE,
+        ) and CURRENT_RELEASE in (
+            FOCAL,
+            JAMMY,
+        ):
+            features["EXPIRE_APPLIES_TO_HASHED_USERS"] = False
+            features["NETPLAN_CONFIG_ROOT_READ_ONLY"] = False
+        assert data["features"] == features
         assert data["system_info"]["default_user"]["name"] == "ubuntu"
 
     @pytest.mark.skipif(
