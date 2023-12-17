@@ -1,9 +1,13 @@
+import contextlib
 import time
 from collections import namedtuple
+from time import sleep
 
 import pytest
 import yaml
 
+from cloudinit.subp import subp
+from tests.integration_tests.clouds import IntegrationCloud
 from tests.integration_tests.instances import IntegrationInstance
 from tests.integration_tests.integration_settings import PLATFORM
 from tests.integration_tests.releases import CURRENT_RELEASE, FOCAL
@@ -124,3 +128,97 @@ def test_no_hotplug_in_userdata(client: IntegrationInstance):
     assert "disabled" == client.execute(
         "cloud-init devel hotplug-hook -s net query"
     )
+
+
+@pytest.mark.skipif(PLATFORM != "ec2", reason="test is ec2 specific")
+def test_multi_nic_ec2_net_utils(session_cloud: IntegrationCloud):
+    ec2 = session_cloud.cloud_instance.client
+    # vpc = session_cloud.cloud_instance.get_or_create_vpc("ec2-cloud-init-integration")
+    with session_cloud.launch(launch_kwargs={}) as client:
+        instance_pub_ip = client.instance.ip
+
+        # subnet_id = client.instance._instance.subnet_id
+        secondary_nic_ip = client.instance.add_network_interface()
+        response = ec2.describe_network_interfaces(
+            Filters=[
+                {
+                    "Name": "private-ip-address",
+                    "Values": [secondary_nic_ip],
+                },
+            ],
+        )
+        nic_id = response["NetworkInterfaces"][0]["NetworkInterfaceId"]
+
+        # Create Elastic IP
+        allocation = ec2.allocate_address(Domain="vpc")
+        try:
+            secondary_pub_ip = allocation["PublicIp"]
+            # TODO: clean up:
+            # response = ec2.release_address(AllocationId='ALLOCATION_ID')
+
+            response = ec2.associate_address(
+                AllocationId=allocation["AllocationId"],
+                NetworkInterfaceId=nic_id,
+            )
+            assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
+
+            # Install amazon-ec2-net-utils
+            assert client.execute(
+                "wget https://people.canonical.com/~fabiomirmar/amazon-ec2-net-utils_2.4.0-1~1_all.deb"
+            ).ok
+            assert client.execute(
+                "sudo dpkg -i amazon-ec2-net-utils_2.4.0-1~1_all.deb"
+            ).ok
+            sleep(5)  # let amazon-ec2-net-utils configure networking
+
+            # SSH over primary NIC works
+            subp("nc -w 1 -zv " + instance_pub_ip + " 22", shell=True)
+
+            import pdb; pdb.set_trace()
+            # THE TEST: SSH over secondary NIC works
+            subp("nc -w 1 -zv " + secondary_pub_ip + " 22", shell=True)
+        finally:
+            with contextlib.suppress(Exception):
+                ec2.release_address(AllocationId=allocation["AllocationId"])
+
+
+@pytest.mark.skipif(PLATFORM != "ec2", reason="test is ec2 specific")
+def test_multi_nic_hotplug(setup_image, session_cloud: IntegrationCloud):
+    ec2 = session_cloud.cloud_instance.client
+    with session_cloud.launch(launch_kwargs={}, user_data=USER_DATA) as client:
+        instance_pub_ip = client.instance.ip
+        secondary_nic_ip = client.instance.add_network_interface()
+        response = ec2.describe_network_interfaces(
+            Filters=[
+                {
+                    "Name": "private-ip-address",
+                    "Values": [secondary_nic_ip],
+                },
+            ],
+        )
+        nic_id = response["NetworkInterfaces"][0]["NetworkInterfaceId"]
+
+        # Create Elastic IP
+        allocation = ec2.allocate_address(Domain="vpc")
+        try:
+            secondary_pub_ip = allocation["PublicIp"]
+            # TODO: clean up:
+            # response = ec2.release_address(AllocationId='ALLOCATION_ID')
+
+            response = ec2.associate_address(
+                AllocationId=allocation["AllocationId"],
+                NetworkInterfaceId=nic_id,
+            )
+            assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
+
+            _wait_till_hotplug_complete(client)
+
+            # SSH over primary NIC works
+            subp("nc -w 1 -zv " + instance_pub_ip + " 22", shell=True)
+
+            import pdb; pdb.set_trace()
+            # THE TEST: SSH over secondary NIC works
+            subp("nc -w 1 -zv " + secondary_pub_ip + " 22", shell=True)
+        finally:
+            with contextlib.suppress(Exception):
+                ec2.release_address(AllocationId=allocation["AllocationId"])
