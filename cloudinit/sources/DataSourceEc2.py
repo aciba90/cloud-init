@@ -14,7 +14,7 @@ import os
 import time
 from typing import List
 
-from cloudinit import dmi, net, sources
+from cloudinit import dmi, net, sources, dhcp
 from cloudinit import url_helper as uhelp
 from cloudinit import util, warnings
 from cloudinit.event import EventScope, EventType
@@ -55,7 +55,6 @@ IDMSV2_SUPPORTED_CLOUD_PLATFORMS = [CloudNames.AWS, CloudNames.ALIYUN]
 
 
 class DataSourceEc2(sources.DataSource):
-
     dsname = "Ec2"
     # Default metadata urls that will be used if none are provided
     # They will be checked for 'resolveability' and some of the
@@ -402,7 +401,7 @@ class DataSourceEc2(sources.DataSource):
             LOG.debug("block-device-mapping not a dictionary: '%s'", bdm)
             return None
 
-        for (entname, device) in bdm.items():
+        for entname, device in bdm.items():
             if entname == name:
                 found = device
                 break
@@ -512,6 +511,8 @@ class DataSourceEc2(sources.DataSource):
                 full_network_config=util.get_cfg_option_bool(
                     self.ds_cfg, "apply_full_imds_network_config", True
                 ),
+                add_policy_routing=True,
+                distro=self.distro,
             )
 
             # Non-VPC (aka Classic) Ec2 instances need to rewrite the
@@ -885,7 +886,12 @@ def _collect_platform_data():
 
 
 def convert_ec2_metadata_network_config(
-    network_md, macs_to_nics=None, fallback_nic=None, full_network_config=True
+    network_md,
+    macs_to_nics=None,
+    fallback_nic=None,
+    full_network_config=True,
+    add_policy_routing=False,
+    distro=None
 ):
     """Convert ec2 metadata to network config version 2 data dict.
 
@@ -927,6 +933,8 @@ def convert_ec2_metadata_network_config(
         return netcfg
     # Apply network config for all nics and any secondary IPv4/v6 addresses
     nic_idx = 0
+    first_dev = True
+    table = 1000
     for mac, nic_name in sorted(macs_to_nics.items()):
         nic_metadata = macs_metadata.get(mac)
         if not nic_metadata:
@@ -935,6 +943,8 @@ def convert_ec2_metadata_network_config(
         # multiplication on the following line
         nic_idx = int(nic_metadata.get("device-number", nic_idx)) + 1
         dhcp_override = {"route-metric": nic_idx * 100}
+        if add_policy_routing and not first_dev:
+            dhcp_override["use-routes"] = True
         dev_config = {
             "dhcp4": True,
             "dhcp4-overrides": dhcp_override,
@@ -942,6 +952,30 @@ def convert_ec2_metadata_network_config(
             "match": {"macaddress": mac.lower()},
             "set-name": nic_name,
         }
+        if add_policy_routing and not first_dev:
+            client = dhcp.select_dhcp_client(distro)
+            leases = client.dhcp_discovery(nic_name, distro)
+            gateway = leases[-1]["routers"]
+            local_ipv4s = nic_metadata["local-ipv4s"]
+            dev_config["routes"] = [
+                {
+                    "to": "0.0.0.0",
+                    "via": gateway,
+                    "table": 1000,
+                },
+                {
+                    "to": local_ipv4s,
+                    "via": "0.0.0.0",
+                    "table": 1000,
+                },
+            ]
+            dev_config["routing-policy"] = [
+                {
+                    "from": local_ipv4s,
+                    "table": 1000,
+                },
+            ]
+            table += 1
         if nic_metadata.get("ipv6s"):  # Any IPv6 addresses configured
             dev_config["dhcp6"] = True
             dev_config["dhcp6-overrides"] = dhcp_override
@@ -949,6 +983,7 @@ def convert_ec2_metadata_network_config(
         if not dev_config["addresses"]:
             dev_config.pop("addresses")  # Since we found none configured
         netcfg["ethernets"][nic_name] = dev_config
+        first_dev = False
     # Remove route-metric dhcp overrides if only one nic configured
     if len(netcfg["ethernets"]) == 1:
         for nic_name in netcfg["ethernets"].keys():
