@@ -14,10 +14,11 @@ import os
 import time
 from typing import List
 
-from cloudinit import dmi, net, sources, dhcp
+from cloudinit import dmi, net, sources
 from cloudinit import url_helper as uhelp
 from cloudinit import util, warnings
 from cloudinit.event import EventScope, EventType
+from cloudinit.net import dhcp
 from cloudinit.net.dhcp import NoDHCPLeaseError
 from cloudinit.net.ephemeral import EphemeralIPNetwork
 from cloudinit.sources.helpers import ec2
@@ -891,7 +892,7 @@ def convert_ec2_metadata_network_config(
     fallback_nic=None,
     full_network_config=True,
     add_policy_routing=False,
-    distro=None
+    distro=None,
 ):
     """Convert ec2 metadata to network config version 2 data dict.
 
@@ -933,7 +934,6 @@ def convert_ec2_metadata_network_config(
         return netcfg
     # Apply network config for all nics and any secondary IPv4/v6 addresses
     nic_idx = 0
-    first_dev = True
     table = 1000
     for mac, nic_name in sorted(macs_to_nics.items()):
         nic_metadata = macs_metadata.get(mac)
@@ -943,7 +943,7 @@ def convert_ec2_metadata_network_config(
         # multiplication on the following line
         nic_idx = int(nic_metadata.get("device-number", nic_idx)) + 1
         dhcp_override = {"route-metric": nic_idx * 100}
-        if add_policy_routing and not first_dev:
+        if add_policy_routing and nic_idx > 1:
             dhcp_override["use-routes"] = True
         dev_config = {
             "dhcp4": True,
@@ -952,9 +952,9 @@ def convert_ec2_metadata_network_config(
             "match": {"macaddress": mac.lower()},
             "set-name": nic_name,
         }
-        if add_policy_routing and not first_dev:
+        if add_policy_routing and nic_idx > 1:
             client = dhcp.select_dhcp_client(distro)
-            leases = client.dhcp_discovery(nic_name, distro)
+            leases = client.dhcp_discovery(nic_name, distro=distro)
             gateway = leases[-1]["routers"]
             local_ipv4s = nic_metadata["local-ipv4s"]
             dev_config["routes"] = [
@@ -983,7 +983,6 @@ def convert_ec2_metadata_network_config(
         if not dev_config["addresses"]:
             dev_config.pop("addresses")  # Since we found none configured
         netcfg["ethernets"][nic_name] = dev_config
-        first_dev = False
     # Remove route-metric dhcp overrides if only one nic configured
     if len(netcfg["ethernets"]) == 1:
         for nic_name in netcfg["ethernets"].keys():

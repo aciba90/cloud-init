@@ -17,6 +17,16 @@ USER_DATA = """\
 updates:
   network:
     when: ['hotplug']
+users:
+  - default
+  - name: suser
+    plain_text_passwd: "suser"
+    shell: /bin/bash
+    lock-passwd: false
+    ssh_pwauth: True
+    chpasswd: { expire: False }
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin
 """
 
 ip_addr = namedtuple("ip_addr", "interface state ip4 ip6")
