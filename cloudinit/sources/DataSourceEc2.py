@@ -953,35 +953,73 @@ def convert_ec2_metadata_network_config(
             "set-name": nic_name,
         }
         if add_policy_routing and nic_idx > 1:
+            cur_table = table + nic_idx
             client = dhcp.select_dhcp_client(distro)
             leases = client.dhcp_discovery(nic_name, distro=distro)
             gateway = leases[-1]["routers"]
-            local_ipv4s = nic_metadata["local-ipv4s"]
+            ipv4s = nic_metadata["local-ipv4s"]
+            ipv4s = [ipv4s] if isinstance(ipv4s, str) else ipv4s
             dev_config["routes"] = [
                 {
                     "to": "0.0.0.0",
                     "via": gateway,
-                    "table": 1000,
-                },
-                {
-                    "to": local_ipv4s,
-                    "via": "0.0.0.0",
-                    "table": 1000,
+                    "table": cur_table,
                 },
             ]
-            dev_config["routing-policy"] = [
-                {
-                    "from": local_ipv4s,
-                    "table": 1000,
-                },
-            ]
-            table += 1
+            dev_config["routing-policy"] = []
+            for ipv4 in ipv4s:
+                dev_config["routes"].append(
+                    {
+                        "to": ipv4,
+                        "via": "0.0.0.0",
+                        "scope": "link",
+                        "table": cur_table,
+                    },
+                )
+                dev_config["routing-policy"].append(
+                    {
+                        "from": ipv4,
+                        "table": cur_table,
+                    },
+                )
+            # TODO: ipv6s
         if nic_metadata.get("ipv6s"):  # Any IPv6 addresses configured
             dev_config["dhcp6"] = True
             dev_config["dhcp6-overrides"] = dhcp_override
         dev_config["addresses"] = get_secondary_addresses(nic_metadata, mac)
         if not dev_config["addresses"]:
             dev_config.pop("addresses")  # Since we found none configured
+        elif add_policy_routing and nic_idx == 0:
+            cur_table = table + nic_idx
+            client = dhcp.select_dhcp_client(distro)
+            leases = client.dhcp_discovery(nic_name, distro=distro)
+            gateway = leases[-1]["routers"]
+            ipv4s = nic_metadata["local-ipv4s"]
+            ipv4s = [ipv4s] if isinstance(ipv4s, str) else ipv4s
+            dev_config["routes"] = [
+                {
+                    "to": "0.0.0.0",
+                    "via": gateway,
+                    "table": cur_table,
+                },
+            ]
+            dev_config["routing-policy"] = []
+            for ipv4 in ipv4s:
+                dev_config["routes"].append(
+                    {
+                        "to": ipv4,
+                        "via": "0.0.0.0",
+                        "scope": "link",
+                        "table": cur_table,
+                    },
+                )
+                dev_config["routing-policy"].append(
+                    {
+                        "from": ipv4,
+                        "table": cur_table,
+                    },
+                )
+
         netcfg["ethernets"][nic_name] = dev_config
     # Remove route-metric dhcp overrides if only one nic configured
     if len(netcfg["ethernets"]) == 1:
