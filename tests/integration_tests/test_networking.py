@@ -1,7 +1,11 @@
 """Networking-related tests."""
+import contextlib
+
 import pytest
 import yaml
 
+from cloudinit.subp import subp
+from tests.integration_tests.clouds import IntegrationCloud
 from tests.integration_tests.instances import IntegrationInstance
 from tests.integration_tests.integration_settings import PLATFORM
 
@@ -91,3 +95,44 @@ class TestNetplanGenerateBehaviorOnReboot:
             client.execute("cat /etc/netplan/50-cloud-init.yaml")
         )
         assert netplan != netplan_new, "changes expected in netplan config"
+
+
+@pytest.mark.skipif(PLATFORM != "ec2", reason="test is ec2 specific")
+def test_ec2_multi_ip(setup_image, session_cloud: IntegrationCloud):
+    ec2 = session_cloud.cloud_instance.client
+    with session_cloud.launch(launch_kwargs={}, user_data=None) as client:
+        nic_id = client.instance._instance.network_interfaces[0].id
+        res = ec2.assign_private_ip_addresses(
+            NetworkInterfaceId=nic_id, SecondaryPrivateIpAddressCount=1
+        )
+        assert res["ResponseMetadata"]["HTTPStatusCode"] == 200
+        secondary_priv_ip = res["AssignedPrivateIpAddresses"][0][
+            "PrivateIpAddress"
+        ]
+        instance_pub_ip = client.instance.ip
+
+        # Create Elastic IP
+        allocation = ec2.allocate_address(Domain="vpc")
+        try:
+            secondary_pub_ip = allocation["PublicIp"]
+
+            res = ec2.associate_address(
+                AllocationId=allocation["AllocationId"],
+                NetworkInterfaceId=nic_id,
+                PrivateIpAddress=secondary_priv_ip,
+            )
+            assert res["ResponseMetadata"]["HTTPStatusCode"] == 200
+            client.execute("cloud-init clean --logs")
+            client.restart()
+
+            # SSH over primary NIC works
+            subp("nc -w 1 -zv " + instance_pub_ip + " 22", shell=True)
+
+            import pdb
+
+            pdb.set_trace()
+            # THE TEST: SSH over secondary NIC works
+            subp("nc -w 1 -zv " + secondary_pub_ip + " 22", shell=True)
+        finally:
+            with contextlib.suppress(Exception):
+                ec2.release_address(AllocationId=allocation["AllocationId"])
