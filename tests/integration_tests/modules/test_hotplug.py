@@ -142,8 +142,8 @@ def test_no_hotplug_in_userdata(client: IntegrationInstance):
 
 @pytest.mark.skipif(PLATFORM != "ec2", reason="test is ec2 specific")
 def test_multi_nic_ec2_net_utils(session_cloud: IntegrationCloud):
+    """TODO: remove this test"""
     ec2 = session_cloud.cloud_instance.client
-    # vpc = session_cloud.cloud_instance.get_or_create_vpc("ec2-cloud-init-integration")
     with session_cloud.launch(launch_kwargs={}) as client:
         instance_pub_ip = client.instance.ip
 
@@ -163,9 +163,6 @@ def test_multi_nic_ec2_net_utils(session_cloud: IntegrationCloud):
         allocation = ec2.allocate_address(Domain="vpc")
         try:
             secondary_pub_ip = allocation["PublicIp"]
-            # TODO: clean up:
-            # response = ec2.release_address(AllocationId='ALLOCATION_ID')
-
             response = ec2.associate_address(
                 AllocationId=allocation["AllocationId"],
                 NetworkInterfaceId=nic_id,
@@ -212,9 +209,6 @@ def test_multi_nic_hotplug(setup_image, session_cloud: IntegrationCloud):
         allocation = ec2.allocate_address(Domain="vpc")
         try:
             secondary_pub_ip = allocation["PublicIp"]
-            # TODO: clean up:
-            # response = ec2.release_address(AllocationId='ALLOCATION_ID')
-
             response = ec2.associate_address(
                 AllocationId=allocation["AllocationId"],
                 NetworkInterfaceId=nic_id,

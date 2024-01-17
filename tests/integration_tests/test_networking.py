@@ -109,7 +109,6 @@ def test_ec2_multi_ip(setup_image, session_cloud: IntegrationCloud):
         secondary_priv_ip = res["AssignedPrivateIpAddresses"][0][
             "PrivateIpAddress"
         ]
-        instance_pub_ip = client.instance.ip
 
         # Create Elastic IP
         allocation = ec2.allocate_address(Domain="vpc")
@@ -126,11 +125,9 @@ def test_ec2_multi_ip(setup_image, session_cloud: IntegrationCloud):
             client.restart()
 
             # SSH over primary NIC works
+            instance_pub_ip = client.instance.ip
             subp("nc -w 1 -zv " + instance_pub_ip + " 22", shell=True)
 
-            import pdb
-
-            pdb.set_trace()
             # THE TEST: SSH over secondary NIC works
             subp("nc -w 1 -zv " + secondary_pub_ip + " 22", shell=True)
         finally:

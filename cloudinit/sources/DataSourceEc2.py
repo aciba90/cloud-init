@@ -961,7 +961,7 @@ def convert_ec2_metadata_network_config(
             ipv4s = [ipv4s] if isinstance(ipv4s, str) else ipv4s
             dev_config["routes"] = [
                 {
-                    "to": "0.0.0.0",
+                    "to": "0.0.0.0/0",
                     "via": gateway,
                     "table": cur_table,
                 },
@@ -971,7 +971,7 @@ def convert_ec2_metadata_network_config(
                 dev_config["routes"].append(
                     {
                         "to": ipv4,
-                        "via": "0.0.0.0",
+                        "via": gateway,
                         "scope": "link",
                         "table": cur_table,
                     },
@@ -989,7 +989,7 @@ def convert_ec2_metadata_network_config(
         dev_config["addresses"] = get_secondary_addresses(nic_metadata, mac)
         if not dev_config["addresses"]:
             dev_config.pop("addresses")  # Since we found none configured
-        elif add_policy_routing and nic_idx == 0:
+        elif add_policy_routing and nic_idx == 1:
             cur_table = table + nic_idx
             client = dhcp.select_dhcp_client(distro)
             leases = client.dhcp_discovery(nic_name, distro=distro)
