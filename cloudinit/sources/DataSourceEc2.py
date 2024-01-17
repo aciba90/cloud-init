@@ -966,16 +966,29 @@ def convert_ec2_metadata_network_config(
                     "table": cur_table,
                 },
             ]
-            dev_config["routing-policy"] = []
-            for ipv4 in ipv4s:
+
+            subnet_prefix_routes = nic_metadata["subnet-ipv4-cidr-block"]
+            subnet_prefix_routes = (
+                [subnet_prefix_routes]
+                if isinstance(subnet_prefix_routes, str)
+                else subnet_prefix_routes
+            )
+            for prefix_route in subnet_prefix_routes:
                 dev_config["routes"].append(
                     {
-                        "to": ipv4,
-                        "via": gateway,
-                        "scope": "link",
+                        "to": prefix_route,
                         "table": cur_table,
                     },
                 )
+
+            dev_config["routing-policy"] = []
+            for ipv4 in ipv4s:
+                # dev_config["routes"].append(
+                #     {
+                #         "to": ipv4,
+                #         "table": cur_table,
+                #     },
+                # )
                 dev_config["routing-policy"].append(
                     {
                         "from": ipv4,
