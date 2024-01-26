@@ -21,7 +21,7 @@ meta: MetaSchema = {
         This module will install the udev rules to enable hotplug if
         supported by the datasource and enabled in the userdata. The udev
         rules will be installed as
-        ``/etc/udev/rules.d/10-cloud-init-hook-hotplug.rules``.
+        ``/etc/udev/rules.d/99-cloud-init-hook-hotplug.rules``.
 
         When hotplug is enabled, newly added network devices will be added
         to the system by cloud-init. After udev detects the event,
@@ -59,10 +59,10 @@ __doc__ = get_meta_doc(meta)
 LOG = logging.getLogger(__name__)
 
 
-HOTPLUG_UDEV_PATH = "/etc/udev/rules.d/10-cloud-init-hook-hotplug.rules"
+HOTPLUG_UDEV_PATH = "/etc/udev/rules.d/99-cloud-init-hook-hotplug.rules"
 HOTPLUG_UDEV_RULES_TEMPLATE = """\
 # Installed by cloud-init due to network hotplug userdata
-ACTION!="add|remove", GOTO="cloudinit_end"
+ACTION!="add|remove", GOTO="cloudinit_end"{extra_rules}
 LABEL="cloudinit_hook"
 SUBSYSTEM=="net", RUN+="{libexecdir}/hook-hotplug"
 LABEL="cloudinit_end"
@@ -104,12 +104,24 @@ def handle(name: str, cfg: Config, cloud: Cloud, args: list) -> None:
         LOG.debug("Skipping hotplug install, udevadm not found")
         return
 
+    extra_rules = ""
+    if cloud.datasource.dsname == "Ec2":
+        # Only trigger hook-hotplug on NICs with Ec2 drivers. Avoid triggering
+        # it on docker virtual NICs and the like. LP: #1946003
+        extra_rules = """
+ENV{ID_NET_DRIVER}=="vif|ena|ixgbevf", GOTO="cloudinit_hook"
+GOTO="cloudinit_end"
+"""
+    if extra_rules:
+        extra_rules = "\n" + extra_rules
     # This may need to turn into a distro property at some point
     libexecdir = "/usr/libexec/cloud-init"
     if not os.path.exists(libexecdir):
         libexecdir = "/usr/lib/cloud-init"
     util.write_file(
         filename=HOTPLUG_UDEV_PATH,
-        content=HOTPLUG_UDEV_RULES_TEMPLATE.format(libexecdir=libexecdir),
+        content=HOTPLUG_UDEV_RULES_TEMPLATE.format(
+            extra_rules=extra_rules, libexecdir=libexecdir
+        ),
     )
     subp.subp(["udevadm", "control", "--reload-rules"])
