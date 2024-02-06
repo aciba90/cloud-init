@@ -12,25 +12,27 @@ from cloudinit import atomic_helper, safeyaml, subp, util
 from cloudinit.sources import DataSourceIBMCloud as ds_ibm
 from cloudinit.sources import DataSourceOracle as ds_oracle
 from cloudinit.sources import DataSourceSmartOS as ds_smartos
+from tests.helpers import cloud_init_project_dir
 from tests.unittests.helpers import (
     CiTestCase,
-    cloud_init_project_dir,
     dir2dict,
     populate_dir,
     populate_dir_with_ts,
 )
 
-UNAME_MYSYS = (
-    "Linux bart 4.4.0-62-generic #83-Ubuntu "
-    "SMP Wed Jan 18 14:10:15 UTC 2017 x86_64 GNU/Linux"
-)
+UNAME_MYSYS = "Linux #83-Ubuntu SMP Wed Jan 18 14:10:15 UTC 2017 x86_64"
 UNAME_PPC64EL = (
-    "Linux diamond 4.4.0-83-generic #106-Ubuntu SMP "
-    "Mon Jun 26 17:53:54 UTC 2017 "
-    "ppc64le ppc64le ppc64le GNU/Linux"
+    "Linux #106-Ubuntu SMP mon Jun 26 17:53:54 UTC 2017 "
+    "ppc64le ppc64le ppc64le"
 )
 UNAME_FREEBSD = (
-    "FreeBSD fbsd12-1 12.1-RELEASE-p10 FreeBSD 12.1-RELEASE-p10 GENERIC  amd64"
+    "FreeBSD FreeBSD 14.0-RELEASE-p3 releng/14.0-n265398-20fae1e1699"
+    "GENERIC-MMCCAM amd64"
+)
+UNAME_OPENBSD = "OpenBSD GENERIC.MP#1397 amd64"
+UNAME_WSL = (
+    "Linux 5.15.133.1-microsoft-standard-WSL2 #1 SMP Thu Oct 5 21:02:42 "
+    "UTC 2023 x86_64"
 )
 
 BLKID_EFI_ROOT = """
@@ -106,8 +108,11 @@ MOCK_VIRT_IS_VMWARE = {"name": "detect_virt", "RET": "vmware", "ret": 0}
 # currenty' SmartOS hypervisor "bhyve" is unknown by systemd-detect-virt.
 MOCK_VIRT_IS_VM_OTHER = {"name": "detect_virt", "RET": "vm-other", "ret": 0}
 MOCK_VIRT_IS_XEN = {"name": "detect_virt", "RET": "xen", "ret": 0}
+MOCK_VIRT_IS_WSL = {"name": "detect_virt", "RET": "wsl", "ret": 0}
 MOCK_UNAME_IS_PPC64 = {"name": "uname", "out": UNAME_PPC64EL, "ret": 0}
 MOCK_UNAME_IS_FREEBSD = {"name": "uname", "out": UNAME_FREEBSD, "ret": 0}
+MOCK_UNAME_IS_OPENBSD = {"name": "uname", "out": UNAME_OPENBSD, "ret": 0}
+MOCK_UNAME_IS_WSL = {"name": "uname", "out": UNAME_WSL, "ret": 0}
 
 shell_true = 0
 shell_false = 1
@@ -198,7 +203,17 @@ class DsIdentifyBase(CiTestCase):
             },
         ]
 
-        written = [d["name"] for d in mocks]
+        uname = "Linux"
+        runpath = "run"
+        written = []
+        for d in mocks:
+            written.append(d["name"])
+            if d["name"] == "uname":
+                uname = d["out"].split(" ")[0]
+        # set runpath so that BSDs use /var/run rather than /run
+        if uname != "Linux":
+            runpath = "var/run"
+
         for data in mocks:
             mocklines.append(write_mock(data))
         for d in default_mocks:
@@ -221,9 +236,9 @@ class DsIdentifyBase(CiTestCase):
             err = e.stderr
 
         cfg = None
-        cfg_out = os.path.join(rootd, "run/cloud-init/cloud.cfg")
+        cfg_out = os.path.join(rootd, runpath, "cloud-init/cloud.cfg")
         if os.path.exists(cfg_out):
-            contents = util.load_file(cfg_out)
+            contents = util.load_text_file(cfg_out)
             try:
                 cfg = safeyaml.load(contents)
             except Exception as e:
@@ -292,11 +307,8 @@ class TestDsIdentify(DsIdentifyBase):
             "KERNEL_CMDLINE",
             "VIRT",
             "UNAME_KERNEL_NAME",
-            "UNAME_KERNEL_RELEASE",
             "UNAME_KERNEL_VERSION",
             "UNAME_MACHINE",
-            "UNAME_NODENAME",
-            "UNAME_OPERATING_SYSTEM",
             "DSNAME",
             "DSLIST",
             "MODE",
@@ -318,9 +330,9 @@ class TestDsIdentify(DsIdentifyBase):
         stricter identifiers). Since the MAAS datasource is at the begining of
         the list, this is particularly troublesome and more concerning than
         NoCloud false positives, for example.
+        """
         config = "LXD-kvm-not-MAAS-1"
         self._test_ds_found(config)
-        """
 
     def test_maas_not_detected_2(self):
         """Don't incorrectly identify maas
@@ -979,6 +991,7 @@ class TestBSDNoSys(DsIdentifyBase):
     """Test *BSD code paths
 
     FreeBSD doesn't have /sys so we use kenv(1) here.
+    OpenBSD uses sysctl(8).
     Other BSD systems fallback to dmidecode(8).
     BSDs also doesn't have systemd-detect-virt(8), so we use sysctl(8) to query
     kern.vm_guest, and optionally map it"""
@@ -989,6 +1002,13 @@ class TestBSDNoSys(DsIdentifyBase):
         This will be used on FreeBSD systems.
         """
         self._test_ds_found("Hetzner-kenv")
+
+    def test_dmi_sysctl(self):
+        """Test that sysctl(8) works on systems which don't have /sys
+
+        This will be used on OpenBSD systems.
+        """
+        self._test_ds_found("Hetzner-sysctl")
 
     def test_dmi_dmidecode(self):
         """Test that dmidecode(8) works on systems which don't have /sys
@@ -1053,6 +1073,20 @@ class TestOracle(DsIdentifyBase):
         mycfg = copy.deepcopy(VALID_CFG["Oracle"])
         mycfg["files"][P_CHASSIS_ASSET_TAG] = "Not Oracle"
         self._check_via_dict(mycfg, rc=RC_NOT_FOUND)
+
+
+class TestWSL(DsIdentifyBase):
+    def test_found(self):
+        """Simple positive test of WSL."""
+        self._test_ds_found("WSL-supported")
+
+    def test_not_found(self):
+        """Simple negative test for WSL due other virt."""
+        self._test_ds_not_found("Not-WSL")
+
+    def test_almost_found(self):
+        """Simple negative test by lack of host filesystem mount points."""
+        self._test_ds_not_found("WSL-no-host-mounts")
 
 
 def blkid_out(disks=None):
@@ -1574,6 +1608,13 @@ VALID_CFG = {
             {"name": "get_kenv_field", "ret": 0, "RET": "Hetzner"},
         ],
     },
+    "Hetzner-sysctl": {
+        "ds": "Hetzner",
+        "mocks": [
+            MOCK_UNAME_IS_OPENBSD,
+            {"name": "get_sysctl_field", "ret": 0, "RET": "Hetzner"},
+        ],
+    },
     "Hetzner-dmidecode": {
         "ds": "Hetzner",
         "mocks": [{"name": "dmi_decode", "ret": 0, "RET": "Hetzner"}],
@@ -1724,10 +1765,7 @@ VALID_CFG = {
             {
                 "name": "uname",
                 "ret": 0,
-                "out": (
-                    "Linux d43da87a-daca-60e8-e6d4-d2ed372662a3 4.3.0 "
-                    "BrandZ virtual linux x86_64 GNU/Linux"
-                ),
+                "out": ("Linux BrandZ virtual linux x86_64"),
             },
             {"name": "blkid", "ret": 2, "out": ""},
         ],
@@ -2067,6 +2105,44 @@ VALID_CFG = {
         "files": {
             P_PRODUCT_NAME: "Not 3DS Outscale VM\n",
             P_SYS_VENDOR: "3DS Outscale\n",
+        },
+    },
+    "Not-WSL": {
+        "ds": "WSL",
+        "mocks": [
+            MOCK_VIRT_IS_KVM,
+        ],
+    },
+    "WSL-no-host-mounts": {
+        "ds": "WSL",
+        "mocks": [
+            MOCK_VIRT_IS_WSL,
+            MOCK_UNAME_IS_WSL,
+        ],
+        "files": {
+            "proc/mounts": (
+                "/dev/sdd / ext4 rw,errors=remount-ro,data=ordered 0 0\n"
+                "cgroup2 /sys/fs/cgroup cgroup2 rw,nosuid,nodev,noexec0 0\n"
+                "snapfuse /snap/core22/1033 fuse.snapfuse ro,nodev,user_id=0,"
+                "group_id=0,allow_other 0 0"
+            ),
+        },
+    },
+    "WSL-supported": {
+        "ds": "WSL",
+        "mocks": [
+            MOCK_VIRT_IS_WSL,
+            MOCK_UNAME_IS_WSL,
+        ],
+        "files": {
+            "proc/mounts": (
+                "/dev/sdd / ext4 rw,errors=remount-ro,data=ordered 0 0\n"
+                "cgroup2 /sys/fs/cgroup cgroup2 rw,nosuid,nodev,noexec0 0\n"
+                "C:\\134 /mnt/c 9p rw,dirsync,aname=drvfs;path=C:\\;uid=0;"
+                "gid=0;symlinkroot=/mnt/...\n"
+                "snapfuse /snap/core22/1033 fuse.snapfuse ro,nodev,user_id=0,"
+                "group_id=0,allow_other 0 0"
+            ),
         },
     },
 }
