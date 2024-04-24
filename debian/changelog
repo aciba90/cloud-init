@@ -1,0 +1,5 @@
+meta-cloud-init (0) UNRELEASED; urgency=medium
+
+  * Initial release. (Closes: #XXXXXX)
+
+ -- Alberto Contreras <alberto.contreras@canonical.com>  Wed, 24 Apr 2024 12:04:43 +0200
