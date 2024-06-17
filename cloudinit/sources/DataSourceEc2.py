@@ -26,6 +26,7 @@ from cloudinit.net.dhcp import NoDHCPLeaseError
 from cloudinit.net.ephemeral import EphemeralIPNetwork
 from cloudinit.sources import NicOrder
 from cloudinit.sources.helpers import ec2
+from cloudinit import subp
 
 LOG = logging.getLogger(__name__)
 
@@ -153,6 +154,33 @@ class DataSourceEc2(sources.DataSource):
             if util.is_FreeBSD():
                 LOG.debug("FreeBSD doesn't support running dhclient with -sf")
                 return False
+
+            def exec(cmd):
+                result = subp.subp(cmd)
+                LOG.debug("`%s` returned stdout='%s' stderr='%s'", cmd, result.stdout, result.stderr)
+
+            def ipa():
+                # TODO: save the output of `ip a` for introspection
+                exec(["ip", "a"])
+
+            try:
+                ipa()
+                # Assign temporary local ip address
+                exec(["ip", "address", "add", "dev", "ens5", "scope", "link", "169.254.1.1/16"])
+                exec(["ip", "link", "set", "ens5", "up"])
+                ipa()
+
+                self._crawled_metadata = util.log_time(
+                    logfunc=LOG.debug,
+                    msg="Crawl of metadata service XXX",
+                    func=self.crawl_metadata,
+                )
+            except (Exception, subp.ProcessExecutionError) as e:
+                LOG.debug("error setting up temporary local ip address: %s", e)
+            else:
+                return True
+
+            LOG.info("fall-back to ephemeral dhcp configuration")
             try:
                 with EphemeralIPNetwork(
                     self.distro,
