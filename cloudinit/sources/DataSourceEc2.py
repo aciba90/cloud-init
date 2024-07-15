@@ -155,24 +155,32 @@ class DataSourceEc2(sources.DataSource):
                 LOG.debug("FreeBSD doesn't support running dhclient with -sf")
                 return False
 
-            try:
-                # TODO: save the output of `ip a` for introspection
-                cmd = ["ip", "a"]
-                result = subp.subp(cmd).stdout.strip()
-                LOG.debug("`ip a` returned '%s'", result)
+            def exec(cmd):
+                result = subp.subp(cmd)
+                LOG.debug("`%s` returned stdout='%s' stderr='%s'", cmd, result.stdout, result.stderr)
 
-                # TODO: Assign temporary local ip address
+            def ipa():
+                # TODO: save the output of `ip a` for introspection
+                exec(["ip", "a"])
+
+            try:
+                ipa()
+                # Assign temporary local ip address
+                exec(["ip", "address", "add", "dev", "ens5", "scope", "link", "169.254.0.0/16"])
+                exec(["ip", "link", "set", "ens5", "up"])
+                ipa()
+
                 self._crawled_metadata = util.log_time(
                     logfunc=LOG.debug,
                     msg="Crawl of metadata service XXX",
                     func=self.crawl_metadata,
                 )
-                raise Exception("wip")
             except (Exception, subp.ProcessExecutionError) as e:
                 LOG.debug("error setting up temporary local ip address: %s", e)
             else:
                 return True
 
+            LOG.info("fall-back to ephemeral dhcp configuration")
             try:
                 with EphemeralIPNetwork(
                     self.distro,
