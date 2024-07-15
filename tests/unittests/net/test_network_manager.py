@@ -16,6 +16,10 @@ def assert_equal_dict(expected_d, found_d):
         assert c == found_d[p]
 
 
+@mock.patch(
+    "cloudinit.net.is_openvswitch_internal_interface",
+    mock.Mock(return_value=False),
+)
 class TestNetworkManagerRenderNetworkState:
     def _parse_network_state_from_config(self, config):
         with mock.patch("cloudinit.net.network_state.get_interfaces_by_mac"):
