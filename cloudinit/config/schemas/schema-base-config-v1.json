@@ -1,0 +1,361 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "$defs": {
+    "all_modules": {
+      "enum": [
+        "ansible",
+        "apk-configure",
+        "apk_configure",
+        "apt-configure",
+        "apt_configure",
+        "apt-pipelining",
+        "apt_pipelining",
+        "bootcmd",
+        "byobu",
+        "ca-certs",
+        "ca_certs",
+        "chef",
+        "disable-ec2-metadata",
+        "disable_ec2_metadata",
+        "disk-setup",
+        "disk_setup",
+        "fan",
+        "final-message",
+        "final_message",
+        "growpart",
+        "grub-dpkg",
+        "grub_dpkg",
+        "install-hotplug",
+        "install_hotplug",
+        "keyboard",
+        "keys-to-console",
+        "keys_to_console",
+        "landscape",
+        "locale",
+        "lxd",
+        "mcollective",
+        "mounts",
+        "ntp",
+        "package-update-upgrade-install",
+        "package_update_upgrade_install",
+        "phone-home",
+        "phone_home",
+        "power-state-change",
+        "power_state_change",
+        "puppet",
+        "reset-rmc",
+        "reset_rmc",
+        "resizefs",
+        "resolv-conf",
+        "resolv_conf",
+        "rh-subscription",
+        "rh_subscription",
+        "rsyslog",
+        "runcmd",
+        "salt-minion",
+        "salt_minion",
+        "scripts-per-boot",
+        "scripts_per_boot",
+        "scripts-per-instance",
+        "scripts_per_instance",
+        "scripts-per-once",
+        "scripts_per_once",
+        "scripts-user",
+        "scripts_user",
+        "scripts-vendor",
+        "scripts_vendor",
+        "seed-random",
+        "seed_random",
+        "set-hostname",
+        "set_hostname",
+        "set-passwords",
+        "set_passwords",
+        "snap",
+        "spacewalk",
+        "ssh",
+        "ssh-authkey-fingerprints",
+        "ssh_authkey_fingerprints",
+        "ssh-import-id",
+        "ssh_import_id",
+        "timezone",
+        "ubuntu-advantage",
+        "ubuntu_advantage",
+        "ubuntu-autoinstall",
+        "ubuntu_autoinstall",
+        "ubuntu-drivers",
+        "ubuntu_drivers",
+        "ubuntu_pro",
+        "update-etc-hosts",
+        "update_etc_hosts",
+        "update-hostname",
+        "update_hostname",
+        "users-groups",
+        "users_groups",
+        "wireguard",
+        "write-files",
+        "write_files",
+        "write-files-deferred",
+        "write_files_deferred",
+        "yum-add-repo",
+        "yum_add_repo",
+        "zypper-add-repo",
+        "zypper_add_repo"
+      ]
+    },
+    "modules_definition": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/all_modules"
+          },
+          {
+            "type": "array",
+            "prefixItems": [
+              {
+                "enum": {
+                  "$ref": "#/$defs/all_modules"
+                }
+              },
+              {
+                "enum": [
+                  "always",
+                  "once",
+                  "once-per-instance"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "merge_definition": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "settings"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "list",
+                  "dict",
+                  "str"
+                ]
+              },
+              "settings": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "allow_delete",
+                    "no_replace",
+                    "replace",
+                    "append",
+                    "prepend",
+                    "recurse_dict",
+                    "recurse_list",
+                    "recurse_array",
+                    "recurse_str"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "base_config": {
+      "type": "object",
+      "properties": {
+        "cloud_init_modules": {
+          "$ref": "#/$defs/modules_definition"
+        },
+        "cloud_config_modules": {
+          "$ref": "#/$defs/modules_definition"
+        },
+        "cloud_final_modules": {
+          "$ref": "#/$defs/modules_definition"
+        },
+        "system_info": {
+          "type": "object"
+        }
+      }
+    },
+    "output_log_operator": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "A filepath operation configuration. This is a string containing a filepath and an optional leading operator: '>', '>>' or '|'. Operators '>' and '>>' indicate whether to overwrite or append to the file. The operator '|' redirects content to the command arguments specified."
+        },
+        {
+          "type": "array",
+          "description": "A list specifying filepath operation configuration for stdout and stderror",
+          "items": {
+            "type": [
+              "string"
+            ]
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "output": {
+              "type": "string",
+              "description": "A filepath operation configuration. This is a string containing a filepath and an optional leading operator: '>', '>>' or '|'. Operators '>' and '>>' indicate whether to overwrite or append to the file. The operator '|' redirects content to the command arguments specified."
+            },
+            "error": {
+              "type": "string",
+              "description": "A filepath operation configuration. A string containing a filepath and an optional leading operator: '>', '>>' or '|'. Operators '>' and '>>' indicate whether to overwrite or append to the file. The operator '|' redirects content to the command arguments specified."
+            }
+          }
+        }
+      ]
+    },
+    "output_config": {
+      "type": "object",
+      "properties": {
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "all": {
+              "$ref": "#/$defs/output_log_operator"
+            },
+            "init": {
+              "$ref": "#/$defs/output_log_operator"
+            },
+            "config": {
+              "$ref": "#/$defs/output_log_operator"
+            },
+            "final": {
+              "$ref": "#/$defs/output_log_operator"
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "#/$defs/base_config"
+    },
+    {
+      "$ref": "#/$defs/output_config"
+    }
+  ],
+  "properties": {
+    "allow_public_ssh_keys": {},
+    "ansible": {},
+    "apk_repos": {},
+    "apt": {},
+    "apt_pipelining": {},
+    "apt_reboot_if_required": {},
+    "apt_update": {},
+    "apt_upgrade": {},
+    "authkey_hash": {},
+    "autoinstall": {},
+    "bootcmd": {},
+    "byobu_by_default": {},
+    "ca-certs": {},
+    "ca_certs": {},
+    "chef": {},
+    "chpasswd": {},
+    "cloud_config_modules": {},
+    "cloud_final_modules": {},
+    "cloud_init_modules": {},
+    "create_hostname_file": {},
+    "device_aliases": {},
+    "disable_ec2_metadata": {},
+    "disable_root": {},
+    "disable_root_opts": {},
+    "disk_setup": {},
+    "drivers": {},
+    "fan": {},
+    "final_message": {},
+    "fqdn": {},
+    "fs_setup": {},
+    "groups": {},
+    "growpart": {},
+    "grub-dpkg": {},
+    "grub_dpkg": {},
+    "hostname": {},
+    "keyboard": {},
+    "landscape": {},
+    "launch-index": {},
+    "locale": {},
+    "locale_configfile": {},
+    "lxd": {},
+    "manage_etc_hosts": {},
+    "manage_resolv_conf": {},
+    "mcollective": {},
+    "merge_how": {},
+    "merge_type": {},
+    "migrate": {},
+    "mount_default_fields": {},
+    "mounts": {},
+    "no_ssh_fingerprints": {},
+    "ntp": {},
+    "output": {},
+    "package_reboot_if_required": {},
+    "package_update": {},
+    "package_upgrade": {},
+    "packages": {},
+    "password": {},
+    "phone_home": {},
+    "power_state": {},
+    "prefer_fqdn_over_hostname": {},
+    "preserve_hostname": {},
+    "puppet": {},
+    "random_seed": {},
+    "reporting": {},
+    "resize_rootfs": {},
+    "resolv_conf": {},
+    "rh_subscription": {},
+    "rsyslog": {},
+    "runcmd": {},
+    "salt_minion": {},
+    "snap": {},
+    "spacewalk": {},
+    "ssh": {},
+    "ssh_authorized_keys": {},
+    "ssh_deletekeys": {},
+    "ssh_fp_console_blacklist": {},
+    "ssh_genkeytypes": {},
+    "ssh_import_id": {},
+    "ssh_key_console_blacklist": {},
+    "ssh_keys": {},
+    "ssh_publish_hostkeys": {},
+    "ssh_pwauth": {},
+    "ssh_quiet_keygen": {},
+    "swap": {},
+    "system_info": {},
+    "timezone": {},
+    "ubuntu_advantage": {},
+    "ubuntu_pro": {},
+    "updates": {},
+    "user": {},
+    "users": {},
+    "vendor_data": {},
+    "version": {},
+    "wireguard": {},
+    "write_files": {},
+    "yum_repo_dir": {},
+    "yum_repos": {},
+    "zypper": {}
+  },
+  "additionalProperties": true
+}

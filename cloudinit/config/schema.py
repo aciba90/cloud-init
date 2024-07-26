@@ -67,6 +67,7 @@ VERSIONED_USERDATA_SCHEMA_FILE = "versions.schema.cloud-config.json"
 # 1. Add a new schema-cloud-config-v#.json
 # 2. change the USERDATA_SCHEMA_FILE to cloud-init-schema-v#.json
 # 3. Add the new version definition to versions.schema.cloud-config.json
+BASE_CONFIG_SCHEMA_FILE = "schema-base-config-v1.json"
 USERDATA_SCHEMA_FILE = "schema-cloud-config-v1.json"
 NETWORK_CONFIG_V1_SCHEMA_FILE = "schema-network-config-v1.json"
 NETWORK_CONFIG_V2_SCHEMA_FILE = "schema-network-config-v2.json"
@@ -158,13 +159,14 @@ SchemaProblems = List[SchemaProblem]
 
 
 class SchemaType(Enum):
-    """Supported schema types are either cloud-config or network-config.
+    """Enumerates available schema types.
 
     Vendordata and Vendordata2 format adheres to cloud-config schema type.
     Cloud Metadata is unique schema to each cloud platform and likely will not
     be represented in this enum.
     """
 
+    BASE_CONFIG = "base-config"
     CLOUD_CONFIG = "cloud-config"
     NETWORK_CONFIG = "network-config"
     NETWORK_CONFIG_V1 = "network-config-v1"
@@ -174,6 +176,9 @@ class SchemaType(Enum):
 # Placeholders for versioned schema and schema file locations.
 # The "latest" key is used in absence of a requested specific version.
 SCHEMA_FILES_BY_TYPE = {
+    SchemaType.BASE_CONFIG: {
+        "latest": BASE_CONFIG_SCHEMA_FILE,
+    },
     SchemaType.CLOUD_CONFIG: {
         "latest": USERDATA_SCHEMA_FILE,
     },

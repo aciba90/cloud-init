@@ -275,6 +275,19 @@ class Init:
         if not self._cfg:
             self._cfg = self._read_cfg(extra_fns)
 
+            # TODO: validate schema here?
+            from cloudinit.config.schema import (
+                SchemaType,
+                validate_cloudconfig_schema,
+            )
+            validate_cloudconfig_schema(
+                config=self._cfg,
+                schema_type=SchemaType.BASE_CONFIG,
+                strict=False,  # Warnings not raising exceptions
+                log_details=False,  # May have wifi passwords in net cfg
+                log_deprecations=True,
+            )
+
     def _read_cfg(self, extra_fns):
         """read and merge our configuration"""
         # No config is passed to Paths() here because we don't yet have a
