@@ -1,3 +1,9 @@
+cloud-init (24.4~1gedd92b71-0ubuntu2~ppa1) UNRELEASED; urgency=medium
+
+  * poc: cloud-specific binary packages
+
+ -- Alberto Contreras <alberto.contreras@canonical.com>  Thu, 15 Aug 2024 11:36:15 +0200
+
 cloud-init (24.4~1gedd92b71-0ubuntu1) oracular; urgency=medium
 
   * Add netcat dependency
