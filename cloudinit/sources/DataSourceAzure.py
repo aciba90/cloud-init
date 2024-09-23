@@ -672,17 +672,41 @@ class DataSourceAzure(sources.DataSource):
             )
             report_diagnostic_event(msg, logger_func=LOG.warning)
 
+
+        def exec(cmd):
+            result = subp.subp(cmd)
+            LOG.debug("`%s` returned stdout='%s' stderr='%s'", cmd, result.stdout, result.stderr)
+
+        def ipa():
+            # TODO: save the output of `ip a` for introspection
+            exec(["ip", "a"])
+
+        dhcp_fallback = True
+        try:
+            ipa()
+            # Assign temporary local ip address
+            exec(["ip", "address", "add", "dev", "eth0", "scope", "link", "169.254.1.1/16"])
+            exec(["ip", "link", "set", "eth0", "up"])
+            ipa()
+            imds_md = self.get_metadata_from_imds(report_failure=True)
+            LOG.debug("fetching imds: %s", e)
+        except (Exception, subp.ProcessExecutionError) as e:
+            LOG.debug("error setting up temporary local ip address: %s", e)
+            dhcp_fallback = True
+
         # If we read OVF from attached media, we are provisioning.  If OVF
         # is not found, we are probably provisioning on a system which does
         # not have UDF support.  In either case, require IMDS metadata.
         # If we require IMDS metadata, try harder to obtain networking, waiting
         # for at least 20 minutes.  Otherwise only wait 5 minutes.
-        requires_imds_metadata = bool(self._iso_dev) or ovf_source is None
-        timeout_minutes = 20 if requires_imds_metadata else 5
-        try:
-            self._setup_ephemeral_networking(timeout_minutes=timeout_minutes)
-        except NoDHCPLeaseError:
-            pass
+        if dhcp_fallback:
+            LOG.warning("falling back to ephemeral dhcp setup")
+            requires_imds_metadata = bool(self._iso_dev) or ovf_source is None
+            timeout_minutes = 20 if requires_imds_metadata else 5
+            try:
+                self._setup_ephemeral_networking(timeout_minutes=timeout_minutes)
+            except NoDHCPLeaseError:
+                pass
 
         imds_md = {}
         if self._is_ephemeral_networking_up():
