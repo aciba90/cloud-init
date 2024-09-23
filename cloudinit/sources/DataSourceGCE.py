@@ -7,11 +7,9 @@ import json
 import logging
 from base64 import b64decode
 
-from cloudinit import dmi, net, sources, url_helper, util
+from cloudinit import dmi, net, sources, subp, url_helper, util
 from cloudinit.distros import ug_util
 from cloudinit.event import EventScope, EventType
-from cloudinit.net.dhcp import NoDHCPLeaseError
-from cloudinit.net.ephemeral import EphemeralDHCPv4
 from cloudinit.sources import DataSourceHostname
 
 LOG = logging.getLogger(__name__)
@@ -60,7 +58,6 @@ class GoogleMetadataFetcher:
 
 
 class DataSourceGCE(sources.DataSource):
-
     dsname = "GCE"
     perform_dhcp_setup = False
     default_update_events = {
@@ -88,6 +85,18 @@ class DataSourceGCE(sources.DataSource):
     def _get_data(self):
         url_params = self.get_url_params()
         if self.perform_dhcp_setup:
+            def exec(cmd):
+                result = subp.subp(cmd)
+                LOG.debug(
+                    "`%s` returned stdout='%s' stderr='%s'",
+                    cmd,
+                    result.stdout,
+                    result.stderr,
+                )
+
+            def ipa():
+                exec(["ip", "a"])
+
             candidate_nics = net.find_candidate_nics()
             if DEFAULT_PRIMARY_INTERFACE in candidate_nics:
                 candidate_nics.remove(DEFAULT_PRIMARY_INTERFACE)
@@ -97,30 +106,60 @@ class DataSourceGCE(sources.DataSource):
                 len(candidate_nics) >= 1
             ), "The instance has to have at least one candidate NIC"
             for candidate_nic in candidate_nics:
-                network_context = EphemeralDHCPv4(
-                    self.distro,
-                    iface=candidate_nic,
-                )
                 try:
-                    with network_context:
-                        try:
-                            ret = read_md(
-                                address=self.metadata_address,
-                                url_params=url_params,
-                            )
-                        except Exception as e:
-                            LOG.debug(
-                                "Error fetching IMD with candidate NIC %s: %s",
-                                candidate_nic,
-                                e,
-                            )
-                            continue
-                except NoDHCPLeaseError:
+                    ipa()
+                    # TODO: choose the ip based on MAC address or randomly in
+                    # the [169.254.1.0, 169.254.254.255] range. See rfc3927.
+
+                    # Assign temporary local ip address
+                    exec(
+                        [
+                            "ip",
+                            "address",
+                            "add",
+                            "dev",
+                            candidate_nic,
+                            "scope",
+                            "link",
+                            "169.254.1.1/16",
+                        ]
+                    )
+                    exec(["ip", "link", "set", candidate_nic, "up"])
+                    ipa()
+                except (Exception, subp.ProcessExecutionError) as e:
+                    LOG.debug(
+                        "Error setting up temporary link-local ip address for"
+                        " candidate NIC: %s",
+                        e,
+                        candidate_nic,
+                    )
+                    # TODO: clean-up link-local route
                     continue
+
+                try:
+                    ret = read_md(
+                        address=self.metadata_address,
+                        url_params=url_params,
+                    )
+                except Exception as e:
+                    LOG.debug(
+                        "Error fetching IMD with candidate NIC %s: %s",
+                        candidate_nic,
+                        e,
+                    )
+                    # TODO: clean-up link-local route
+                    continue
+
                 if ret["success"]:
                     self.distro.fallback_interface = candidate_nic
                     LOG.debug("Primary NIC found: %s.", candidate_nic)
                     break
+                else:
+                    LOG.debug("is not Primary NIC: %s.", candidate_nic)
+
+            # TODO: If none of the candidate NICs succeeded with link-local
+            # then fallback to ephemeral DHCP
+
             if self.distro.fallback_interface is None:
                 LOG.warning(
                     "Did not find a fallback interface on %s.", self.cloud_name
@@ -244,7 +283,6 @@ def _parse_public_keys(public_keys_data, default_user=None):
 
 
 def read_md(address=None, url_params=None, platform_check=True):
-
     if address is None:
         address = MD_V1_URL
 
