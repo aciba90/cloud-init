@@ -39,3 +39,19 @@ def test_boothook_header_runs_part_per_instance(client: IntegrationInstance):
     ]
     for msg in expected_msgs:
         assert msg in output_log
+
+
+def test_clean_reboot(client: IntegrationInstance):
+    log = client.read_from_file("/var/log/cloud-init.log")
+    verify_clean_log(log)
+    verify_clean_boot(client)
+    client.execute("rm -rv /etc/netplan/50-cloud-init.yaml", use_sudo=True)
+    client.execute(
+        "cloud-init clean --logs --machine-id -c all", use_sudo=True
+    )
+
+    client.restart()
+
+    log = client.read_from_file("/var/log/cloud-init.log")
+    verify_clean_log(log)
+    verify_clean_boot(client)
