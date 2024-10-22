@@ -96,6 +96,8 @@ class DataSourceGCE(sources.DataSource):
 
             def ipa():
                 exec(["ip", "a"])
+                exec(["ip", "neighbor", "show"])
+                exec(["ip", "route", "show"])
 
             candidate_nics = net.find_candidate_nics()
             if DEFAULT_PRIMARY_INTERFACE in candidate_nics:
