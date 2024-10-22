@@ -689,9 +689,11 @@ class DataSourceAzure(sources.DataSource):
             # Assign temporary local ip address
             exec(["ip", "address", "add", "dev", "eth0", "scope", "link", "169.254.1.1/16"])
             exec(["ip", "link", "set", "eth0", "up"])
-            exec(["default", "via", "169.254.0.1", "dev", "eth0"])
-            exec(["ip", "route", "add", "169.254.169.254", "via", "169.254.0.1", "dev", "eth0"])
-            exec(["ip", "route", "add", "169.63.129.16", "via", "169.254.0.1", "dev", "eth0"])
+            # exec(["default", "via", "169.254.0.1", "dev", "eth0"])
+            # exec(["ip", "route", "add", "169.254.0.0/16", "dev", "eth0", "src", "169.254.1.1"])
+            # exec(["curl", "--verbose", "-H", "Metadata: true", "http://169.254.169.254/metadata/instance?api-version=2021-08-01&extended=true"])
+            exec(["traceroute", "-T", "-p", "80", "169.254.169.254"])
+
             ipa()
             imds_md = self.get_metadata_from_imds(report_failure=True)
             LOG.debug("fetching imds")
