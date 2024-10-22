@@ -49,6 +49,8 @@ def test_clean_reboot(client: IntegrationInstance):
     client.execute(
         "cloud-init clean --logs --machine-id -c all", use_sudo=True
     )
+    client.execute("apt-get update", use_sudo=True)
+    client.execute("apt-get install -y traceroute", use_sudo=True)
 
     client.restart()
 
