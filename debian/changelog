@@ -1,4 +1,4 @@
-cloud-init (24.4.1-0ubuntu0~20.04.4) UNRELEASED; urgency=medium
+cloud-init (24.4.1-0ubuntu0~20.04.4) focal-security; urgency=medium
 
   * cherry-pick 8c3ae1bb: fix: Don't attempt to identify non-x86 OpenStack
     instances (LP: #2069607) (CVE-2024-6174)
@@ -7,7 +7,7 @@ cloud-init (24.4.1-0ubuntu0~20.04.4) UNRELEASED; urgency=medium
   * cherry-pick e3f42adc: fix: strict disable in ds-identify on no
     datasources found (LP: #2069607) (CVE-2024-6174)
 
- -- Alberto Contreras <alberto.contreras@canonical.com>  Wed, 25 Jun 2025 17:27:45 +0200
+ -- Alberto Contreras <alberto.contreras@canonical.com>  Wed, 25 Jun 2025 17:32:57 +0200
 
 cloud-init (24.4.1-0ubuntu0~20.04.3) focal; urgency=medium
 
